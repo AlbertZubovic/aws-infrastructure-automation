@@ -1,20 +1,41 @@
 - hosts: app
   become: true
+  gather_facts: false
   vars_files:
     - group_vars/all.yml
+
+  pre_tasks:
+    - name: Ensure Python 3 & pip
+      ansible.builtin.dnf:
+        name:
+          - python3
+          - python3-pip
+        state: present
+        update_cache: true
+
+    - name: Install Docker engine
+      ansible.builtin.dnf:
+        name: docker
+        state: present
+
+    - name: Enable and start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create venv and install Docker SDK
+      ansible.builtin.pip:
+        name: docker
+        state: present
+        virtualenv: /opt/ansible-venv
+        virtualenv_command: /usr/bin/python3 -m venv
+
+    - name: Use venv Python for subsequent tasks
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /opt/ansible-venv/bin/python
+
   tasks:
-    - name: Install Docker
-      yum: { name: docker, state: present }
-
-    - name: Enable & start Docker
-      service: { name: docker, state: started, enabled: true }
-
-    - name: Install Python3 and pip
-      yum: { name: [python3, python3-pip], state: present }
-
-    - name: Install docker SDK for Python
-      pip: { name: docker, executable: pip3 }
-
     - name: Pull images
       community.docker.docker_image:
         name: "{{ item }}"
@@ -35,11 +56,9 @@
         restart_policy: always
         networks: [{ name: posts_net }]
         env:
-          POSTGRES_USER: "{{ db_user }}"
-          POSTGRES_PASSWORD: "{{ db_password }}"
-          POSTGRES_DB: "{{ db_name }}"
-        published_ports:
-          - "{{ db_port }}:5432"
+          POSTGRES_USER: "{{ db_user | string }}"
+          POSTGRES_PASSWORD: "{{ db_password | string }}"
+          POSTGRES_DB: "{{ db_name | string }}"
         state: started
 
     - name: Run Backend container
@@ -47,14 +66,16 @@
         name: posts_backend
         image: "{{ backend_image }}"
         restart_policy: always
+        recreate: true
         networks: [{ name: posts_net }]
         env:
           DB_HOST: "posts_db"
-          DB_PORT: "5432"
-          DB_USER: "{{ db_user }}"
-          DB_PASSWORD: "{{ db_password }}"
-          DB_NAME: "{{ db_name }}"
-          PORT: "{{ backend_port }}"
+          DB_PORT: "{{ db_port | string }}"
+          DB_USER: "{{ db_user | string }}"
+          DB_PASSWORD: "{{ db_password | string }}"
+          DB_NAME: "{{ db_name | string }}"
+          PORT: "{{ backend_port | string }}"
         published_ports:
-          - "{{ backend_port }}:{{ backend_port }}"
+          - "{{ backend_port | string }}:{{ backend_port | string }}"
         state: started
+
