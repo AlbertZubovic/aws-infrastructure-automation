@@ -56,5 +56,5 @@
           DB_NAME: "{{ db_name }}"
           PORT: "{{ backend_port }}"
         published_ports:
-          - "{{ backend_port }}:8000"
+          - "{{ backend_port }}:{{ backend_port }}"
         state: started
