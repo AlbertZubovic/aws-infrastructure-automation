@@ -88,3 +88,46 @@ scripts/ # helper scripts (deploy/refresh/verify/destroy)
 - **Root disk size:** EC2 root volume set to 20 GB (gp3) to avoid no space left on device during Docker pulls.
 - **No AWS credentials in the repo:** The AWS provider uses a local profile (`academy`).
 - **Idempotency:** Re-running `terraform apply` and `ansible-playbook` results in no-op changes when the system is already configured.
+
+## Prerequisites
+
+- **Local tools:** Terraform (≥ 1.6), AWS CLI, Ansible, `curl`.
+- **Windows users:** PowerShell 7+ and **WSL (Ubuntu)** for running Ansible.
+- **AWS:** AWS Academy profile configured locally (e.g., `academy`) and an EC2 key pair (scripts default to `a2-key3`).
+- **PEM permissions:** `chmod 600 ~/.ssh/a2-key3.pem`.
+
+## Automated deployment (recommended)
+
+### Powershell (Windows)
+```powershell
+# From repo root
+pwsh .\scripts\deploy.ps1
+# This applies Terraform, writes ansible/inventory.ini with the new IP,
+# copies your PEM into WSL and fixes permissions.
+```
+
+### Bash (Linux/WSL)
+```bash
+chmod +x scripts/deploy.sh
+scripts/deploy.sh
+# This applies Terraform, writes ansible/inventory.ini, and runs Ansible.
+```
+
+## Manual deployment (alternative)
+
+### Terraform
+```bash
+cd terraform
+terraform init
+terraform apply -auto-approve -var="key_name=a2-key3"
+terraform output  
+```
+
+### Ansible
+```bash
+# install Ansible collection
+ansible-galaxy collection install -r ansible/requirements.yml
+
+# ensure ansible/inventory.ini contains the EC2 IP and PEM path
+ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
+```
