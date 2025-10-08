@@ -1,0 +1,81 @@
+- hosts: app
+  become: true
+  gather_facts: false
+  vars_files:
+    - group_vars/all.yml
+
+  pre_tasks:
+    - name: Ensure Python 3 & pip
+      ansible.builtin.dnf:
+        name:
+          - python3
+          - python3-pip
+        state: present
+        update_cache: true
+
+    - name: Install Docker engine
+      ansible.builtin.dnf:
+        name: docker
+        state: present
+
+    - name: Enable and start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create venv and install Docker SDK
+      ansible.builtin.pip:
+        name: docker
+        state: present
+        virtualenv: /opt/ansible-venv
+        virtualenv_command: /usr/bin/python3 -m venv
+
+    - name: Use venv Python for subsequent tasks
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /opt/ansible-venv/bin/python
+
+  tasks:
+    - name: Pull images
+      community.docker.docker_image:
+        name: "{{ item }}"
+        source: pull
+      loop:
+        - "{{ db_image }}"
+        - "{{ backend_image }}"
+
+    - name: Create docker network
+      community.docker.docker_network:
+        name: posts_net
+        state: present
+
+    - name: Run DB container
+      community.docker.docker_container:
+        name: posts_db
+        image: "{{ db_image }}"
+        restart_policy: always
+        networks: [{ name: posts_net }]
+        env:
+          POSTGRES_USER: "{{ db_user | string }}"
+          POSTGRES_PASSWORD: "{{ db_password | string }}"
+          POSTGRES_DB: "{{ db_name | string }}"
+        state: started
+
+    - name: Run Backend container
+      community.docker.docker_container:
+        name: posts_backend
+        image: "{{ backend_image }}"
+        restart_policy: always
+        recreate: true
+        networks: [{ name: posts_net }]
+        env:
+          DB_HOST: "posts_db"
+          DB_PORT: "{{ db_port | string }}"
+          DB_USER: "{{ db_user | string }}"
+          DB_PASSWORD: "{{ db_password | string }}"
+          DB_NAME: "{{ db_name | string }}"
+          PORT: "{{ backend_port | string }}"
+        published_ports:
+          - "{{ backend_port | string }}:{{ backend_port | string }}"
+        state: started
+

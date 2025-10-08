@@ -8,6 +8,7 @@ terraform {
 
 provider "aws" {
   region = "us-east-1"
+  profile = "academy"
 }
 
 # Network data sources
@@ -74,4 +75,10 @@ resource "aws_instance" "app" {
   key_name                    = var.key_name
   associate_public_ip_address = true
   tags                        = { Name = "a2-app-ec2" }
+
+  root_block_device {
+    volume_size = 20
+    volume_type = "gp3"
+    delete_on_termination = true
+  }
 }
