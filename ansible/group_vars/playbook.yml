@@ -1,0 +1,60 @@
+- hosts: app
+  become: true
+  vars_files:
+    - group_vars/all.yml
+  tasks:
+    - name: Install Docker
+      yum: { name: docker, state: present }
+
+    - name: Enable & start Docker
+      service: { name: docker, state: started, enabled: true }
+
+    - name: Install Python3 and pip
+      yum: { name: [python3, python3-pip], state: present }
+
+    - name: Install docker SDK for Python
+      pip: { name: docker, executable: pip3 }
+
+    - name: Pull images
+      community.docker.docker_image:
+        name: "{{ item }}"
+        source: pull
+      loop:
+        - "{{ db_image }}"
+        - "{{ backend_image }}"
+
+    - name: Create docker network
+      community.docker.docker_network:
+        name: posts_net
+        state: present
+
+    - name: Run DB container
+      community.docker.docker_container:
+        name: posts_db
+        image: "{{ db_image }}"
+        restart_policy: always
+        networks: [{ name: posts_net }]
+        env:
+          POSTGRES_USER: "{{ db_user }}"
+          POSTGRES_PASSWORD: "{{ db_password }}"
+          POSTGRES_DB: "{{ db_name }}"
+        published_ports:
+          - "{{ db_port }}:5432"
+        state: started
+
+    - name: Run Backend container
+      community.docker.docker_container:
+        name: posts_backend
+        image: "{{ backend_image }}"
+        restart_policy: always
+        networks: [{ name: posts_net }]
+        env:
+          DB_HOST: "posts_db"
+          DB_PORT: "5432"
+          DB_USER: "{{ db_user }}"
+          DB_PASSWORD: "{{ db_password }}"
+          DB_NAME: "{{ db_name }}"
+          PORT: "{{ backend_port }}"
+        published_ports:
+          - "{{ backend_port }}:8000"
+        state: started
