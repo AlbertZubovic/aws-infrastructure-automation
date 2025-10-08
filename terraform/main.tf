@@ -1,6 +1,6 @@
 # Terraform and Provider setup
 terraform {
-  # Require Terraform
+  required_version = ">= 1.6"    
   required_providers {
     aws = { source = "hashicorp/aws", version = "~> 5.0" }
   }
@@ -30,4 +30,20 @@ resource "aws_security_group" "app" {
   ingress { from_port = 8000 to_port = 8000 protocol = "tcp" cidr_blocks = ["0.0.0.0/0"] }
 
   egress  { from_port = 0 to_port = 0 protocol = "-1" cidr_blocks = ["0.0.0.0/0"] }
+}
+
+data "aws_ami" "al2023" {
+  most_recent = true
+  owners      = ["137112412989"]
+  filter { name = "name" values = ["al2023-ami-*-x86_64"] }
+}
+
+resource "aws_instance" "app" {
+  ami = data.aws_ami.al2023.id
+  instance_type = "t3.micro"
+  subnet_id = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.app.id]
+  key_name = var.key_name
+  associate_public_ip_address = true
+  tags = { Name = "a2-app-ec2" }
 }
