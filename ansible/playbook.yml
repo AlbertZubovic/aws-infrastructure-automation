@@ -79,3 +79,23 @@
           - "{{ backend_port | string }}:{{ backend_port | string }}"
         state: started
 
+    - name: Pull frontend image
+      community.docker.docker_image:
+        name: "{{ frontend_image }}"
+        source: pull
+
+    - name: Run Frontend container
+      community.docker.docker_container:
+        name: posts_frontend
+        image: "{{ frontend_image }}"
+        restart_policy: always
+        recreate: true
+        networks: [{ name: posts_net }]
+        env:
+          PORT: "{{ frontend_port | string }}"
+          BACKEND_URL: "{{ backend_internal_url }}"
+        published_ports:
+          - "{{ http_port | string }}:{{ frontend_port | string }}"
+        state: started
+
+
