@@ -35,28 +35,38 @@ jobs:
         with:
           terraform_version: 1.6.6
 
-      # Initialize without S3 backend can create the bucket/table first
-      - name: Terraform init (local)
-        working-directory: terraform
-        run: terraform init -backend=false -input=false
+      # Bootstrap Phase
+      - name: Terraform init (bootstrap)
+        working-directory: terraform/bootstrap
+        run: terraform init -input=false
 
-      # Create the S3 bucket and DynamoDB table for state/locking
-      - name: Bootstrap remote backend infrastructure
+      - name: Terraform apply (bootstrap)
+        working-directory: terraform/bootstrap
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve -input=false \
+            -var "aws_region=${{ secrets.AWS_REGION }}" \
+            -var "state_bucket_name=${{ secrets.TF_STATE_BUCKET }}" \
+            -var "state_table_name=${{ secrets.TF_LOCK_TABLE }}"
+
+      # Main Stack
+      - name: Terraform init (main, remote)
         working-directory: terraform
         run: |
-          terraform apply -auto-approve -input=false \
-            -target=aws_s3_bucket.tf_state \
-            -target=aws_dynamodb_table.tf_locks
+          set -euo pipefail
+          terraform init -reconfigure -input=false \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true"
 
-      # Reconfigure to use the S3 backend and migrate
-      - name: Terraform init (migrate state to S3)
+      - name: Terraform apply (main)
         working-directory: terraform
-        run: terraform init -migrate-state -reconfigure -input=false
-
-      # Apply everything else
-      - name: Terraform apply
-        working-directory: terraform
-        run: terraform apply -lock-timeout=5m -auto-approve -input=false -var "key_name=${KEY_NAME}"
+        run: |
+          set -euo pipefail
+          terraform apply -lock-timeout=5m -auto-approve -input=false \
+            -var "key_name=${KEY_NAME}"
 
       # Capture outputs
       - name: Capture TF outputs
