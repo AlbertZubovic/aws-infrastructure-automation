@@ -1,6 +1,7 @@
 services:
   backend:
     image: rmitdominichynes/sdo-2025:backend
+    platform: "linux/amd64"
     build:
       context: ./backend
     environment:
@@ -13,6 +14,7 @@ services:
 
   frontend:
     image: rmitdominichynes/sdo-2025:frontend
+    platform: "linux/amd64"
     build:
       context: ./frontend
     environment:
@@ -23,6 +25,7 @@ services:
 
   db:
     image: rmitdominichynes/sdo-2025:db
+    platform: "linux/amd64"    
     build:
       context: ./backend
       dockerfile: DB.Dockerfile
