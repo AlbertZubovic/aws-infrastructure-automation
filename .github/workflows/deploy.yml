@@ -15,6 +15,7 @@ jobs:
     env:
       KEY_NAME: a2-key3
       AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_IN_AUTOMATION: "true"
 
     steps:
       - uses: actions/checkout@v4
@@ -47,15 +48,15 @@ jobs:
             -target=aws_s3_bucket.tf_state \
             -target=aws_dynamodb_table.tf_locks
 
-      # Reconfigure to use the S3 backend.
-      - name: Terraform init (reconfigure to S3 backend)
+      # Reconfigure to use the S3 backend and migrate
+      - name: Terraform init (migrate state to S3)
         working-directory: terraform
-        run: terraform init -reconfigure -input=false
+        run: terraform init -migrate-state -reconfigure -input=false
 
       # Apply everything else
       - name: Terraform apply
         working-directory: terraform
-        run: terraform apply -auto-approve -input=false -var "key_name=${KEY_NAME}"
+        run: terraform apply -lock-timeout=5m -auto-approve -input=false -var "key_name=${KEY_NAME}"
 
       # Capture outputs
       - name: Capture TF outputs
