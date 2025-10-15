@@ -207,5 +207,4 @@ curl http://<EC2_IP> | head -n 20
    ```bash
    curl -I http://<frontend-public-ip>
    curl -I http://<backend-public-ip>:8000 || echo "backend not public"
-   ```
 
