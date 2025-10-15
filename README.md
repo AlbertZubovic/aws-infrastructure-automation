@@ -207,4 +207,41 @@ curl http://<EC2_IP> | head -n 20
    ```bash
    curl -I http://<frontend-public-ip>
    curl -I http://<backend-public-ip>:8000 || echo "backend not public"
+   
+
+# Section D - Multi instance deployment with Application Load Balancers
+This section implements a highly-available setup where Frontend and Backend each run on multiple EC2 instances and are load balanced by ALBs. Terraform uses an S3 remote backend with DynamoDB state locking.
+
+## What's deployed
+- Frontend
+  - 2 EC2 instances running the frontend container
+  - Public ALB (aws_lb.frontend) on :80
+  - Target group (aws_lb_target_group.frontend) with both instances
+  - Security groups
+    - frontend_alb: 0.0.0.0/0 -> :80 to the ALB
+    - frontend: allows :80 only from FE ALB SG, SSH :22 for provisioning
+- Backend
+  - 2× EC2 instances running the backend container
+  - Internal ALB (aws_lb.backend) on :8000
+  - Target group (aws_lb_target_group.backend) with both instances
+  - Security groups
+    - backend_alb: :8000 only from Frontend SG
+    - backend: :8000 only from BE ALB SG, SSH :22 for provisioning
+- Database
+  - 1× EC2 instance running Postgres
+  - Security group db: :5432 only from Backend SG
+
+## How to verify
+### Frontend (public):
+```bash
+FE_ALB=$(terraform output -raw frontend_alb_dns)
+curl -I http://$FE_ALB
+```
+
+### Backend (internal):
+- From device, should fail.
+- From a frontend EC2 (SSH in):
+```bash
+BACKEND_ALB=$(terraform output -raw backend_alb_dns)
+curl -sSf http://$BACKEND_ALB:8000/health
 ```
