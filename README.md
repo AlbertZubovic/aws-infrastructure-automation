@@ -183,3 +183,29 @@ scripts/destroy.sh
 curl -I http://<EC2_IP>
 # Fetch HTML
 curl http://<EC2_IP> | head -n 20
+```
+
+# Section C - Three tier on separate EC2s and GitHub Actions
+
+**What changed**
+- Terraform now creates **three EC2 instances**: `a2-frontend-ec2`, `a2-backend-ec2`, `a2-db-ec2`.
+- **Security Groups**:
+  - Frontend SG: public **:80** (HTTP) and SSH for provisioning.
+  - Backend SG: **:8000** only from **Frontend SG** (not public).
+  - DB SG: **:5432** only from **Backend SG** (not public).
+- Ansible deploys:
+  - DB container on DB host (no published ports).
+  - Backend container on Backend host (wired to DB via **DB private IP**).
+  - Frontend container on Frontend host (published **80:8081**, `BACKEND_URL=http://<backend-private-ip>:8000`).
+- GitHub Actions workflow **runs on `main` only** and performs: Terraform apply, generate inventory from outputs, Ansible deploy. **No AWS creds in repo**.
+
+**How to verify**
+1. Open the latest run in **Actions** and check:
+   - `Terraform apply` succeeded and printed FE/BE/DB IPs.
+   - `Ansible` tasks ended `ok/changed` without failures.
+2. From your machine:
+   ```bash
+   curl -I http://<frontend-public-ip>
+   curl -I http://<backend-public-ip>:8000 || echo "backend not public"
+   ```
+
