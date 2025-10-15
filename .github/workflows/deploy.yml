@@ -61,12 +61,13 @@ jobs:
         env:
           EC2_KEY: ${{ secrets.EC2_SSH_KEY_PEM }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           umask 077
           printf '%s\n' "$EC2_KEY" > ~/.ssh/${{ env.KEY_NAME }}.pem
-          sed -i 's/\r$//' ~/.ssh/${{ env.KEY_NAME }}.pem
+          tr -d '\r' < ~/.ssh/${{ env.KEY_NAME }}.pem > ~/.ssh/${{ env.KEY_NAME }}.pem.clean && mv ~/.ssh/${{ env.KEY_NAME }}.pem.clean ~/.ssh/${{ env.KEY_NAME }}.pem
           chmod 600 ~/.ssh/${{ env.KEY_NAME }}.pem
-          ssh-keygen -l -f ~/.ssh/${{ env.KEY_NAME }}.pem || (echo "Invalid private key format" && exit 1)
+          ssh-keygen -y -f ~/.ssh/${{ env.KEY_NAME }}.pem > /dev/null
 
       - name: Check AWS key pair exists
         shell: bash
