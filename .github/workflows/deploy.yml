@@ -49,20 +49,27 @@ jobs:
           TF_VAR_state_table_name: ${{ secrets.TF_LOCK_TABLE }}
         run: |
           set -euo pipefail
-          terraform state show aws_s3_bucket.tf_state >/dev/null 2>&1 || \
-            terraform import aws_s3_bucket.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
 
-          terraform state show aws_s3_bucket_public_access_block.tf_state >/dev/null 2>&1 || \
-            terraform import aws_s3_bucket_public_access_block.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+          imp() { terraform state show "$1" >/dev/null 2>&1 || terraform import "$1" "$2"; }
 
-          terraform state show aws_s3_bucket_versioning.tf_state >/dev/null 2>&1 || \
-            terraform import aws_s3_bucket_versioning.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+          imp aws_s3_bucket.tf_state "${{ secrets.TF_STATE_BUCKET }}"
 
-          terraform state show aws_s3_bucket_server_side_encryption_configuration.tf_state >/dev/null 2>&1 || \
-            terraform import aws_s3_bucket_server_side_encryption_configuration.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+          if aws s3api get-public-access-block --bucket "${{ secrets.TF_STATE_BUCKET }}" >/dev/null 2>&1; then
+            imp aws_s3_bucket_public_access_block.tf_state "${{ secrets.TF_STATE_BUCKET }}"
+          fi
 
-          terraform state show aws_dynamodb_table.tf_locks >/dev/null 2>&1 || \
-            terraform import aws_dynamodb_table.tf_locks "${{ secrets.TF_LOCK_TABLE }}" || true
+          VER_STATUS=$(aws s3api get-bucket-versioning --bucket "${{ secrets.TF_STATE_BUCKET }}" --query 'Status' --output text 2>/dev/null || true)
+          if [ "$VER_STATUS" = "Enabled" ] || [ "$VER_STATUS" = "Suspended" ]; then
+            imp aws_s3_bucket_versioning.tf_state "${{ secrets.TF_STATE_BUCKET }}"
+          fi
+
+          if aws s3api get-bucket-encryption --bucket "${{ secrets.TF_STATE_BUCKET }}" >/dev/null 2>&1; then
+            imp aws_s3_bucket_server_side_encryption_configuration.tf_state "${{ secrets.TF_STATE_BUCKET }}"
+          fi
+
+          if aws dynamodb describe-table --table-name "${{ secrets.TF_LOCK_TABLE }}" --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1; then
+            imp aws_dynamodb_table.tf_locks "${{ secrets.TF_LOCK_TABLE }}"
+          fi
 
       - name: Terraform apply (bootstrap)
         working-directory: terraform/bootstrap
