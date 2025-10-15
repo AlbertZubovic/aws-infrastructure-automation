@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      KEY_NAME: a2-key3
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -input=false -var "key_name=${KEY_NAME}"
+
+      - name: Capture TF outputs
+        id: tfout
+        working-directory: terraform
+        run: |
+          echo "DB_PUB=$(terraform output -raw db_public_ip)" >> $GITHUB_OUTPUT
+          echo "DB_PRIV=$(terraform output -raw db_private_ip)" >> $GITHUB_OUTPUT
+          echo "BE_PUB=$(terraform output -raw backend_public_ip)" >> $GITHUB_OUTPUT
+          echo "BE_PRIV=$(terraform output -raw backend_private_ip)" >> $GITHUB_OUTPUT
+          echo "FE_PUB=$(terraform output -raw frontend_public_ip)" >> $GITHUB_OUTPUT
+          echo "FE_PRIV=$(terraform output -raw frontend_private_ip)" >> $GITHUB_OUTPUT
+
+      - name: Install Ansible and deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ansible python3-pip
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Write SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY_PEM }}" > ~/.ssh/${{ env.KEY_NAME }}.pem
+          chmod 600 ~/.ssh/${{ env.KEY_NAME }}.pem
+
+      - name: Generate inventory from TF outputs
+        run: |
+          cat > ansible/inventory.ini <<'EOF'
+          [db]
+          ${{ steps.tfout.outputs.DB_PRIV }} ansible_host=${{ steps.tfout.outputs.DB_PUB }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/${{ env.KEY_NAME }}.pem
+
+          [backend]
+          ${{ steps.tfout.outputs.BE_PRIV }} ansible_host=${{ steps.tfout.outputs.BE_PUB }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/${{ env.KEY_NAME }}.pem db_private_ip=${{ steps.tfout.outputs.DB_PRIV }}
+
+          [frontend]
+          ${{ steps.tfout.outputs.FE_PRIV }} ansible_host=${{ steps.tfout.outputs.FE_PUB }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/${{ env.KEY_NAME }}.pem backend_private_ip=${{ steps.tfout.outputs.BE_PRIV }}
+          EOF
+
+          echo "inventory"
+          cat ansible/inventory.ini
+
+      - name: Ansible - deploy containers
+        run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
+
+      - name: Smoke check
+        run: |
+          set -e
+          curl -I "http://${{ steps.tfout.outputs.FE_PUB }}" || exit 1

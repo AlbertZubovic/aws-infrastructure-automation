@@ -169,3 +169,17 @@ pwsh .\scripts\destroy.ps1
 chmod +x scripts/destroy.sh
 scripts/destroy.sh
 ```
+
+# Section B - Frontend container (public on :80)
+
+## What changed
+- Ansible now deploys a **Frontend** container (`rmitdominichynes/sdo-2025:frontend`) on the same Docker network as the Backend/DB.
+- The Frontend listens on **8081** in-container and is published to **host port 80**.
+- `BACKEND_URL` is set to `http://posts_backend:8000`, so the Frontend can call the Backend.
+
+## Verify
+```bash
+# From your device
+curl -I http://<EC2_IP>
+# Fetch HTML
+curl http://<EC2_IP> | head -n 20
