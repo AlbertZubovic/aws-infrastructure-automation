@@ -43,6 +43,10 @@ jobs:
       # Try to import existing bucket/table
       - name: Import existing backend resources
         working-directory: terraform/bootstrap
+        env:
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+          TF_VAR_state_bucket_name: ${{ secrets.TF_STATE_BUCKET }}
+          TF_VAR_state_table_name: ${{ secrets.TF_LOCK_TABLE }}
         run: |
           set -euo pipefail
           terraform state show aws_s3_bucket.tf_state >/dev/null 2>&1 || \
@@ -59,7 +63,6 @@ jobs:
 
           terraform state show aws_dynamodb_table.tf_locks >/dev/null 2>&1 || \
             terraform import aws_dynamodb_table.tf_locks "${{ secrets.TF_LOCK_TABLE }}" || true
-
 
       - name: Terraform apply (bootstrap)
         working-directory: terraform/bootstrap
