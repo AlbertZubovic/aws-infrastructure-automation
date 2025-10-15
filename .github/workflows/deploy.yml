@@ -78,6 +78,14 @@ jobs:
           echo "inventory"
           cat ansible/inventory.ini
 
+      - name: Trust EC2 SSH host keys
+        run: |
+          touch ~/.ssh/known_hosts
+          awk '/ansible_host=/{for(i=1;i<=NF;i++){if($i ~ /ansible_host=/){split($i,a,"="); print a[2]}}}' ansible/inventory.ini \
+            | sort -u \
+            | xargs -I{} sh -c 'ssh-keyscan -T 5 -H {} >> ~/.ssh/known_hosts 2>/dev/null || true'
+          chmod 600 ~/.ssh/known_hosts
+
       - name: Ansible - deploy containers
         run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
 
