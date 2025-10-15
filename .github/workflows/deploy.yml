@@ -37,7 +37,7 @@ jobs:
       # Initialize without S3 backend can create the bucket/table first
       - name: Terraform init (local)
         working-directory: terraform
-        run: terraform init -input=false
+        run: terraform init -backend=false -input=false
 
       # Create the S3 bucket and DynamoDB table for state/locking
       - name: Bootstrap remote backend infrastructure
@@ -145,7 +145,7 @@ jobs:
           ANSIBLE_SSH_ARGS: "-o IdentitiesOnly=yes"
         run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
 
-      # 10) Smoke test against the FE ALB
+      # Smoke test against the FE ALB
       - name: Smoke check
         run: |
           FE_ALB=${{ steps.tfout.outputs.FE_ALB }}
