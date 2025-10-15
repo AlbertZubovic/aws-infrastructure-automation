@@ -40,6 +40,27 @@ jobs:
         working-directory: terraform/bootstrap
         run: terraform init -input=false
 
+      # Try to import existing bucket/table
+      - name: Import existing backend resources
+        working-directory: terraform/bootstrap
+        run: |
+          set -euo pipefail
+          terraform state show aws_s3_bucket.tf_state >/dev/null 2>&1 || \
+            terraform import aws_s3_bucket.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+
+          terraform state show aws_s3_bucket_public_access_block.tf_state >/dev/null 2>&1 || \
+            terraform import aws_s3_bucket_public_access_block.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+
+          terraform state show aws_s3_bucket_versioning.tf_state >/dev/null 2>&1 || \
+            terraform import aws_s3_bucket_versioning.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+
+          terraform state show aws_s3_bucket_server_side_encryption_configuration.tf_state >/dev/null 2>&1 || \
+            terraform import aws_s3_bucket_server_side_encryption_configuration.tf_state "${{ secrets.TF_STATE_BUCKET }}" || true
+
+          terraform state show aws_dynamodb_table.tf_locks >/dev/null 2>&1 || \
+            terraform import aws_dynamodb_table.tf_locks "${{ secrets.TF_LOCK_TABLE }}" || true
+
+
       - name: Terraform apply (bootstrap)
         working-directory: terraform/bootstrap
         run: |
