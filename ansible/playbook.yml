@@ -1,15 +1,10 @@
-- hosts: app
+- hosts: all
   become: true
   gather_facts: false
-  vars_files:
-    - group_vars/all.yml
-
   pre_tasks:
-    - name: Ensure Python 3 & pip
+    - name: Ensure Python 3 and pip
       ansible.builtin.dnf:
-        name:
-          - python3
-          - python3-pip
+        name: [python3, python3-pip]
         state: present
         update_cache: true
 
@@ -35,14 +30,14 @@
       ansible.builtin.set_fact:
         ansible_python_interpreter: /opt/ansible-venv/bin/python
 
+# DB host
+- hosts: db
+  become: true
   tasks:
-    - name: Pull images
+    - name: Pull DB image
       community.docker.docker_image:
-        name: "{{ item }}"
+        name: "{{ db_image }}"
         source: pull
-      loop:
-        - "{{ db_image }}"
-        - "{{ backend_image }}"
 
     - name: Create docker network
       community.docker.docker_network:
@@ -56,10 +51,26 @@
         restart_policy: always
         networks: [{ name: posts_net }]
         env:
-          POSTGRES_USER: "{{ db_user | string }}"
-          POSTGRES_PASSWORD: "{{ db_password | string }}"
-          POSTGRES_DB: "{{ db_name | string }}"
+          POSTGRES_USER: "{{ db_user }}"
+          POSTGRES_PASSWORD: "{{ db_password }}"
+          POSTGRES_DB: "{{ db_name }}"
         state: started
+
+# Backend host
+- hosts: backend
+  become: true
+  vars:
+    db_ip: "{{ hostvars[inventory_hostname].db_private_ip | default(groups['db'][0]) }}"
+  tasks:
+    - name: Pull Backend image
+      community.docker.docker_image:
+        name: "{{ backend_image }}"
+        source: pull
+
+    - name: Create docker network
+      community.docker.docker_network:
+        name: posts_net
+        state: present
 
     - name: Run Backend container
       community.docker.docker_container:
@@ -69,20 +80,29 @@
         recreate: true
         networks: [{ name: posts_net }]
         env:
-          DB_HOST: "posts_db"
+          DB_HOST: "{{ db_ip }}"
           DB_PORT: "{{ db_port | string }}"
-          DB_USER: "{{ db_user | string }}"
-          DB_PASSWORD: "{{ db_password | string }}"
-          DB_NAME: "{{ db_name | string }}"
+          DB_USER: "{{ db_user }}"
+          DB_PASSWORD: "{{ db_password }}"
+          DB_NAME: "{{ db_name }}"
           PORT: "{{ backend_port | string }}"
-        published_ports:
-          - "{{ backend_port | string }}:{{ backend_port | string }}"
         state: started
 
-    - name: Pull frontend image
+# Frontend host
+- hosts: frontend
+  become: true
+  vars:
+    be_ip: "{{ hostvars[inventory_hostname].backend_private_ip | default(groups['backend'][0]) }}"
+  tasks:
+    - name: Pull Frontend image
       community.docker.docker_image:
         name: "{{ frontend_image }}"
         source: pull
+
+    - name: Create docker network
+      community.docker.docker_network:
+        name: posts_net
+        state: present
 
     - name: Run Frontend container
       community.docker.docker_container:
@@ -93,9 +113,7 @@
         networks: [{ name: posts_net }]
         env:
           PORT: "{{ frontend_port | string }}"
-          BACKEND_URL: "{{ backend_internal_url }}"
+          BACKEND_URL: "http://{{ be_ip }}:{{ backend_port }}"
         published_ports:
-          - "{{ http_port | string }}:{{ frontend_port | string }}"
+          - "{{ http_port }}:{{ frontend_port }}"
         state: started
-
-
