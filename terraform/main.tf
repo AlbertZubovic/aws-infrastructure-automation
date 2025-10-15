@@ -256,13 +256,13 @@ resource "aws_lb_listener" "frontend" {
 }
 
 resource "aws_lb_target_group_attachment" "frontend" {
-  for_each         = { for i in aws_instance.frontend : i.id => i }
+  for_each         = { for idx, inst in aws_instance.frontend : idx => inst.id }
   target_group_arn = aws_lb_target_group.frontend.arn
-  target_id        = each.key
+  target_id        = each.value
   port             = 80
 }
 
-# ADDED: Backend ALB
+# Backend ALB
 resource "aws_lb" "backend" {
   name               = "a2-backend-alb"
   load_balancer_type = "application"
@@ -299,8 +299,8 @@ resource "aws_lb_listener" "backend" {
 }
 
 resource "aws_lb_target_group_attachment" "backend" {
-  for_each         = { for i in aws_instance.backend : i.id => i }
+  for_each         = { for idx, inst in aws_instance.backend : idx => inst.id }
   target_group_arn = aws_lb_target_group.backend.arn
-  target_id        = each.key
+  target_id        = each.value
   port             = 8000
 }
