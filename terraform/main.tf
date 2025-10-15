@@ -25,7 +25,7 @@ data "aws_subnets" "default" {
 # Security Groups
 # Frontend:
 resource "aws_security_group" "frontend" {
-  name = "a2-frontend-sg"
+  name_prefix = "a2-frontend-sg-"
   description = "Frontend host"
   vpc_id = data.aws_vpc.default.id
 
@@ -52,7 +52,7 @@ resource "aws_security_group" "frontend" {
 
 # Backend:
 resource "aws_security_group" "backend" {
-  name = "a2-backend-sg"
+  name_prefix = "a2-backend-sg-"
   description = "Backend host"
   vpc_id = data.aws_vpc.default.id
 
@@ -79,7 +79,7 @@ resource "aws_security_group" "backend" {
 
 # DB:
 resource "aws_security_group" "db" {
-  name = "a2-db-sg"
+  name_prefix = "a2-db-sg-"
   description = "DB host"
   vpc_id = data.aws_vpc.default.id
 
