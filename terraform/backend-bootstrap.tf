@@ -3,12 +3,13 @@
 variable "state_bucket_name" {
   description = "unique S3 bucket name for Terraform state"
   type = string
+  default = "a2-tf-state-s4007755"
 }
 
 variable "state_table_name" {
   description = "DynamoDB table name for Terraform state locking"
-  type        = string
-  default     = "a2-tf-locks"
+  type = string
+  default = "a2-tf-locks-s4007755"
 }
 
 # S3 bucket for state
@@ -18,10 +19,10 @@ resource "aws_s3_bucket" "tf_state" {
 
 # Block public access
 resource "aws_s3_bucket_public_access_block" "tf_state" {
-  bucket                  = aws_s3_bucket.tf_state.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
+  bucket = aws_s3_bucket.tf_state.id
+  block_public_acls = true
+  block_public_policy = true
+  ignore_public_acls = true
   restrict_public_buckets = true
 }
 

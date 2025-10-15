@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch: {}
 
 permissions:
@@ -15,9 +15,11 @@ jobs:
     env:
       KEY_NAME: a2-key3
       AWS_REGION: ${{ secrets.AWS_REGION }}
+
     steps:
       - uses: actions/checkout@v4
 
+      # Configure AWS access
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -26,19 +28,36 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # Terraform CLI
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
 
-      - name: Terraform init
+      # Initialize without S3 backend can create the bucket/table first
+      - name: Terraform init (local)
         working-directory: terraform
         run: terraform init -input=false
 
+      # Create the S3 bucket and DynamoDB table for state/locking
+      - name: Bootstrap remote backend infrastructure
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=aws_s3_bucket.tf_state \
+            -target=aws_dynamodb_table.tf_locks
+
+      # Reconfigure to use the S3 backend.
+      - name: Terraform init (reconfigure to S3 backend)
+        working-directory: terraform
+        run: terraform init -reconfigure -input=false
+
+      # Apply everything else
       - name: Terraform apply
         working-directory: terraform
         run: terraform apply -auto-approve -input=false -var "key_name=${KEY_NAME}"
 
+      # Capture outputs
       - name: Capture TF outputs
         id: tfout
         working-directory: terraform
@@ -49,14 +68,18 @@ jobs:
           echo "BE_PRIV=$(terraform output -raw backend_private_ip)" >> $GITHUB_OUTPUT
           echo "FE_PUB=$(terraform output -raw frontend_public_ip)" >> $GITHUB_OUTPUT
           echo "FE_PRIV=$(terraform output -raw frontend_private_ip)" >> $GITHUB_OUTPUT
+          echo "FE_ALB=$(terraform output -raw frontend_alb_dns)" >> $GITHUB_OUTPUT
+          echo "BE_ALB=$(terraform output -raw backend_alb_dns)" >> $GITHUB_OUTPUT
 
+      # Ansible and deps
       - name: Install Ansible and deps
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ansible python3-pip
+          sudo apt-get install -y ansible python3-pip jq
           ansible-galaxy collection install -r ansible/requirements.yml
 
-      - name: Write SSH key 
+      # Write SSH private key from secret
+      - name: Write SSH key
         shell: bash
         env:
           EC2_KEY: ${{ secrets.EC2_SSH_KEY_PEM }}
@@ -69,26 +92,44 @@ jobs:
           chmod 600 ~/.ssh/${{ env.KEY_NAME }}.pem
           ssh-keygen -y -f ~/.ssh/${{ env.KEY_NAME }}.pem > /dev/null
 
+      # Sanity check
       - name: Check AWS key pair exists
         shell: bash
         run: aws ec2 describe-key-pairs --key-names "${{ env.KEY_NAME }}" --query 'KeyPairs[0].KeyName' --output text
 
-      - name: Generate inventory from TF outputs
+      # Generate inventory for all instances.
+      - name: Generate inventory from EC2 tags
+        shell: bash
         run: |
-          cat > ansible/inventory.ini <<'EOF'
-          [db]
-          ${{ steps.tfout.outputs.DB_PRIV }} ansible_host=${{ steps.tfout.outputs.DB_PUB }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/${{ env.KEY_NAME }}.pem
+          set -euo pipefail
+          FE_JSON=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=a2-frontend-ec2-*" "Name=instance-state-name,Values=running")
+          BE_JSON=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=a2-backend-ec2-*"  "Name=instance-state-name,Values=running")
+          DB_JSON=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=a2-db-ec2" "Name=instance-state-name,Values=running")
 
-          [backend]
-          ${{ steps.tfout.outputs.BE_PRIV }} ansible_host=${{ steps.tfout.outputs.BE_PUB }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/${{ env.KEY_NAME }}.pem db_private_ip=${{ steps.tfout.outputs.DB_PRIV }}
+          jq_hosts () { jq -r '.Reservations[].Instances[] | select(.PublicIpAddress != null) | "\(.PrivateIpAddress) \(.PublicIpAddress)"'; }
 
-          [frontend]
-          ${{ steps.tfout.outputs.FE_PRIV }} ansible_host=${{ steps.tfout.outputs.FE_PUB }} ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/${{ env.KEY_NAME }}.pem backend_private_ip=${{ steps.tfout.outputs.BE_PRIV }}
-          EOF
+          {
+            echo "[db]"
+            echo "$DB_JSON" | jq_hosts | awk '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem\n",$1,$2,"'${{ env.KEY_NAME }}'"}'
+
+            echo
+            echo "[backend]"
+            DB_PRIV=$(terraform -chdir=terraform output -raw db_private_ip)
+            echo "$BE_JSON" | jq_hosts | awk -v db="$DB_PRIV" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem db_private_ip=%s\n",$1,$2,"'${{ env.KEY_NAME }}'",db}'
+
+            echo
+            echo "[frontend]"
+            BE_ALB=$(terraform -chdir=terraform output -raw backend_alb_dns || true)
+            if [ -z "$BE_ALB" ] || [ "$BE_ALB" = "null" ]; then
+              BE_ALB=$(echo "$BE_JSON" | jq -r '.Reservations[].Instances[0].PrivateIpAddress')
+            fi
+            echo "$FE_JSON" | jq_hosts | awk -v be="$BE_ALB" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem backend_private_ip=%s\n",$1,$2,"'${{ env.KEY_NAME }}'",be}'
+          } > ansible/inventory.ini
 
           echo "inventory"
           cat ansible/inventory.ini
 
+      # Trust host keys to avoid interactive prompt
       - name: Trust EC2 SSH host keys
         run: |
           touch ~/.ssh/known_hosts
@@ -97,24 +138,28 @@ jobs:
             | xargs -I{} sh -c 'ssh-keyscan -T 5 -H {} >> ~/.ssh/known_hosts 2>/dev/null || true'
           chmod 600 ~/.ssh/known_hosts
 
+      # Run Ansible across all instances
       - name: Ansible - deploy containers
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
           ANSIBLE_SSH_ARGS: "-o IdentitiesOnly=yes"
         run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
 
+      # 10) Smoke test against the FE ALB
       - name: Smoke check
         run: |
-          for i in {1..10}; do
-            if curl -sSfI --max-time 5 "http://${{ steps.tfout.outputs.FE_PUB }}"; then
+          FE_ALB=${{ steps.tfout.outputs.FE_ALB }}
+          for i in {1..15}; do
+            if curl -sSfI --max-time 5 "http://$FE_ALB"; then
               exit 0
             fi
-            echo "frontend not ready yet, retrying ($i/10)…"
+            echo "frontend not ready yet, retrying ($i/15)…"
             sleep 6
           done
           echo "frontend failed health check"
           exit 1
 
+      # Upload inventory for debugging
       - name: Upload inventory
         if: always()
         uses: actions/upload-artifact@v4

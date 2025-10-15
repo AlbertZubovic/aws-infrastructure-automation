@@ -207,7 +207,7 @@ curl http://<EC2_IP> | head -n 20
    ```bash
    curl -I http://<frontend-public-ip>
    curl -I http://<backend-public-ip>:8000 || echo "backend not public"
-   
+
 
 # Section D - Multi instance deployment with Application Load Balancers
 This section implements a highly-available setup where Frontend and Backend each run on multiple EC2 instances and are load balanced by ALBs. Terraform uses an S3 remote backend with DynamoDB state locking.
@@ -245,3 +245,9 @@ curl -I http://$FE_ALB
 BACKEND_ALB=$(terraform output -raw backend_alb_dns)
 curl -sSf http://$BACKEND_ALB:8000/health
 ```
+
+### Remote Terraform backend (S3 and DynamoDB)
+We use an S3 bucket for state and a DynamoDB table for state locking.
+
+- Bucket: `terraform output -raw state_bucket`
+- Lock table: `terraform output -raw state_lock_table`
