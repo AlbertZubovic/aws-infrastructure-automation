@@ -107,7 +107,7 @@ resource "aws_security_group" "db" {
 # EC2 instances
 data "aws_ami" "al2023" {
   most_recent = true
-  owners = ["137112412989"] # Amazon Linux 2023
+  owners = ["137112412989"]
   filter {
     name = "name"
     values = ["al2023-ami-*-x86_64"]
@@ -123,6 +123,8 @@ resource "aws_instance" "db" {
   key_name = var.key_name
   associate_public_ip_address = true
   tags = { Name = "a2-db-ec2" }
+
+  instance_initiated_shutdown_behavior = "stop"
 
   root_block_device {
     volume_size = 20
@@ -141,6 +143,8 @@ resource "aws_instance" "backend" {
   associate_public_ip_address = true
   tags = { Name = "a2-backend-ec2" }
 
+  instance_initiated_shutdown_behavior = "stop"
+
   root_block_device {
     volume_size = 20
     volume_type = "gp3"
@@ -157,6 +161,8 @@ resource "aws_instance" "frontend" {
   key_name = var.key_name
   associate_public_ip_address = true
   tags = { Name = "a2-frontend-ec2" }
+
+  instance_initiated_shutdown_behavior = "stop" 
 
   root_block_device {
     volume_size = 20
