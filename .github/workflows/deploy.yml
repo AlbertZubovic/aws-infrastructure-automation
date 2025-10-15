@@ -56,11 +56,21 @@ jobs:
           sudo apt-get install -y ansible python3-pip
           ansible-galaxy collection install -r ansible/requirements.yml
 
-      - name: Write SSH key
+      - name: Write SSH key 
+        shell: bash
+        env:
+          EC2_KEY: ${{ secrets.EC2_SSH_KEY_PEM }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY_PEM }}" > ~/.ssh/${{ env.KEY_NAME }}.pem
+          umask 077
+          printf '%s\n' "$EC2_KEY" > ~/.ssh/${{ env.KEY_NAME }}.pem
+          sed -i 's/\r$//' ~/.ssh/${{ env.KEY_NAME }}.pem
           chmod 600 ~/.ssh/${{ env.KEY_NAME }}.pem
+          ssh-keygen -l -f ~/.ssh/${{ env.KEY_NAME }}.pem || (echo "Invalid private key format" && exit 1)
+
+      - name: Check AWS key pair exists
+        shell: bash
+        run: aws ec2 describe-key-pairs --key-names "${{ env.KEY_NAME }}" --query 'KeyPairs[0].KeyName' --output text
 
       - name: Generate inventory from TF outputs
         run: |
@@ -87,9 +97,26 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Ansible - deploy containers
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          ANSIBLE_SSH_ARGS: "-o IdentitiesOnly=yes"
         run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
 
       - name: Smoke check
         run: |
-          set -e
-          curl -I "http://${{ steps.tfout.outputs.FE_PUB }}" || exit 1
+          for i in {1..10}; do
+            if curl -sSfI --max-time 5 "http://${{ steps.tfout.outputs.FE_PUB }}"; then
+              exit 0
+            fi
+            echo "frontend not ready yet, retrying ($i/10)…"
+            sleep 6
+          done
+          echo "frontend failed health check"
+          exit 1
+
+      - name: Upload inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-inventory
+          path: ansible/inventory.ini
