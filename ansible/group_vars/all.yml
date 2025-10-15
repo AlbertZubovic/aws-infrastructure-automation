@@ -1,9 +1,14 @@
 backend_image: "rmitdominichynes/sdo-2025:backend"
 db_image: "rmitdominichynes/sdo-2025:db"
+frontend_image: "rmitdominichynes/sdo-2025:frontend"
 
 backend_port: 8000
 db_port: 5432
+frontend_port: 8081
+http_port: 80
 
 db_user: "postgres"
 db_password: "postgres"
 db_name: "posts"
+
+backend_internal_url: "http://posts_backend:8000"
