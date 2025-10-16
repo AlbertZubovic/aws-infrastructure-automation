@@ -1,6 +1,8 @@
-- hosts: all
+# Bootstrap everywhere except bastion
+- hosts: "all:!bastion"
   become: true
   gather_facts: false
+  serial: 1
   pre_tasks:
     - name: Ensure Python 3 and pip
       ansible.builtin.dnf:
@@ -21,7 +23,9 @@
 
     - name: Create venv and install Docker SDK
       ansible.builtin.pip:
-        name: docker
+        name:
+          - docker
+          - requests
         state: present
         virtualenv: /opt/ansible-venv
         virtualenv_command: /usr/bin/python3 -m venv
@@ -49,6 +53,7 @@
         name: posts_db
         image: "{{ db_image }}"
         restart_policy: always
+        recreate: true
         networks: [{ name: posts_net }]
         env:
           POSTGRES_USER: "{{ db_user }}"
@@ -61,8 +66,9 @@
 # Backend host
 - hosts: backend
   become: true
+  serial: 1
   vars:
-    db_ip: "{{ hostvars[inventory_hostname].db_private_ip | default(groups['db'][0]) }}"
+    db_ip: "{{ hostvars[groups['db'][0]].ansible_host | default(groups['db'][0]) }}"
   tasks:
     - name: Pull Backend image
       community.docker.docker_image:
@@ -89,14 +95,15 @@
           DB_NAME: "{{ db_name }}"
           PORT: "{{ backend_port | string }}"
         published_ports:
-        - "{{ backend_port }}:{{ backend_port }}"
+          - "{{ backend_port }}:{{ backend_port }}"
         state: started
 
-# Frontend host
-- hosts: frontend
+# Frontend hosts except the bastion
+- hosts: "frontend:!bastion"
   become: true
+  serial: 1
   vars:
-    be_ip: "{{ hostvars[inventory_hostname].backend_private_ip | default(groups['backend'][0]) }}"
+    be_host: "{{ backend_alb_dns }}"
   tasks:
     - name: Pull Frontend image
       community.docker.docker_image:
@@ -117,7 +124,72 @@
         networks: [{ name: posts_net }]
         env:
           PORT: "{{ frontend_port | string }}"
-          BACKEND_URL: "http://{{ be_ip }}:{{ backend_port }}"
+          BACKEND_URL: "http://{{ be_host }}:{{ backend_port }}"
+        published_ports:
+          - "{{ http_port }}:{{ frontend_port }}"
+        state: started
+
+# Bootstrap the bastion
+- hosts: bastion
+  become: true
+  gather_facts: false
+  serial: 1
+  pre_tasks:
+    - name: Ensure Python 3 and pip
+      ansible.builtin.dnf:
+        name: [python3, python3-pip]
+        state: present
+        update_cache: true
+
+    - name: Install Docker engine
+      ansible.builtin.dnf:
+        name: docker
+        state: present
+
+    - name: Enable and start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create venv and install Docker SDK
+      ansible.builtin.pip:
+        name: [docker, requests]
+        state: present
+        virtualenv: /opt/ansible-venv
+        virtualenv_command: /usr/bin/python3 -m venv
+
+    - name: Use venv Python for subsequent tasks
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /opt/ansible-venv/bin/python
+
+# Start the FE container on the bastion node
+- hosts: "frontend:&bastion"
+  become: true
+  serial: 1
+  vars:
+    be_host: "{{ backend_alb_dns }}"
+  tasks:
+    - name: Pull Frontend image
+      community.docker.docker_image:
+        name: "{{ frontend_image }}"
+        source: pull
+
+    - name: Create docker network
+      community.docker.docker_network:
+        name: posts_net
+        state: present
+
+    - name: Run Frontend container
+      community.docker.docker_container:
+        name: posts_frontend
+        image: "{{ frontend_image }}"
+        restart_policy: always
+        recreate: true
+        networks: [{ name: posts_net }]
+        env:
+          PORT: "{{ frontend_port | string }}"
+          BACKEND_URL: "http://{{ be_host }}:{{ backend_port }}"
         published_ports:
           - "{{ http_port }}:{{ frontend_port }}"
         state: started

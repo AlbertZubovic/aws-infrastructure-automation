@@ -104,14 +104,9 @@ jobs:
         id: tfout
         working-directory: terraform
         run: |
-          echo "DB_PUB=$(terraform output -raw db_public_ip)" >> $GITHUB_OUTPUT
-          echo "DB_PRIV=$(terraform output -raw db_private_ip)" >> $GITHUB_OUTPUT
-          echo "BE_PUB=$(terraform output -raw backend_public_ip)" >> $GITHUB_OUTPUT
-          echo "BE_PRIV=$(terraform output -raw backend_private_ip)" >> $GITHUB_OUTPUT
-          echo "FE_PUB=$(terraform output -raw frontend_public_ip)" >> $GITHUB_OUTPUT
-          echo "FE_PRIV=$(terraform output -raw frontend_private_ip)" >> $GITHUB_OUTPUT
           echo "FE_ALB=$(terraform output -raw frontend_alb_dns)" >> $GITHUB_OUTPUT
           echo "BE_ALB=$(terraform output -raw backend_alb_dns)" >> $GITHUB_OUTPUT
+
 
       # Ansible and deps
       - name: Install Ansible and deps
@@ -139,53 +134,84 @@ jobs:
         shell: bash
         run: aws ec2 describe-key-pairs --key-names "${{ env.KEY_NAME }}" --query 'KeyPairs[0].KeyName' --output text
 
-      # Generate inventory for all instances.
+      # Generate inventory
       - name: Generate inventory from EC2 tags
         shell: bash
         run: |
           set -euo pipefail
+
           FE_JSON=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=a2-frontend-ec2-*" "Name=instance-state-name,Values=running")
           BE_JSON=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=a2-backend-ec2-*"  "Name=instance-state-name,Values=running")
           DB_JSON=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=a2-db-ec2" "Name=instance-state-name,Values=running")
 
-          jq_hosts () { jq -r '.Reservations[].Instances[] | select(.PublicIpAddress != null) | "\(.PrivateIpAddress) \(.PublicIpAddress)"'; }
+          # Helpers
+          jq_frontend_rows() {
+            jq -r '.Reservations[].Instances[] | select(.PublicIpAddress != null) | "\(.PrivateIpAddress) \(.PublicIpAddress)"'
+          }
+          jq_private_rows() {
+            jq -r '.Reservations[].Instances[] | select(.PrivateIpAddress != null) | "\(.PrivateIpAddress)"'
+          }
+
+          # Pick a FE public IP
+          FE_JUMP_IP=$(echo "$FE_JSON" | jq -r '.Reservations[].Instances[] | select(.PublicIpAddress != null) | .PublicIpAddress' | head -n1)
+          [ -n "$FE_JUMP_IP" ] && [ "$FE_JUMP_IP" != "null" ] || { echo "No frontend public IP found"; exit 1; }
+
+          # Internal BE ALB DNS from TF output
+          BE_ALB="${{ steps.tfout.outputs.BE_ALB }}"
+          if [ -z "$BE_ALB" ] || [ "$BE_ALB" = "null" ]; then
+            BE_ALB=$(echo "$BE_JSON" | jq -r '.Reservations[].Instances[0].PrivateIpAddress')
+          fi
 
           {
+            # Bastion group: direct SSH
+            echo "[bastion]"
+            printf "%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem ansible_ssh_common_args='-o IdentitiesOnly=yes'\n" "$FE_JUMP_IP" "${KEY_NAME}"
+
+            echo
             echo "[db]"
-            echo "$DB_JSON" | jq_hosts | awk '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem\n",$1,$2,"'${{ env.KEY_NAME }}'"}'
+            echo "$DB_JSON" | jq_private_rows | \
+              awk -v k="~/.ssh/${KEY_NAME}.pem" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s\n",$1,$1,k}'
 
             echo
             echo "[backend]"
-            DB_PRIV=$(terraform -chdir=terraform output -raw db_private_ip)
-            echo "$BE_JSON" | jq_hosts | awk -v db="$DB_PRIV" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem db_private_ip=%s\n",$1,$2,"'${{ env.KEY_NAME }}'",db}'
+            DB_PRIV=$(echo "$DB_JSON" | jq -r '.Reservations[].Instances[] | .PrivateIpAddress' | head -n1)
+            echo "$BE_JSON" | jq_private_rows | \
+              awk -v k="~/.ssh/${KEY_NAME}.pem" -v db="$DB_PRIV" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s db_private_ip=%s\n",$1,$1,k,db}'
 
             echo
             echo "[frontend]"
-            BE_ALB=$(terraform -chdir=terraform output -raw backend_alb_dns || true)
-            if [ -z "$BE_ALB" ] || [ "$BE_ALB" = "null" ]; then
-              BE_ALB=$(echo "$BE_JSON" | jq -r '.Reservations[].Instances[0].PrivateIpAddress')
-            fi
-            echo "$FE_JSON" | jq_hosts | awk -v be="$BE_ALB" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/%s.pem backend_private_ip=%s\n",$1,$2,"'${{ env.KEY_NAME }}'",be}'
+            echo "$FE_JSON" | jq_frontend_rows | \
+              awk -v k="~/.ssh/${KEY_NAME}.pem" -v be="$BE_ALB" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s backend_private_ip=%s\n",$1,$2,k,be}'
+
+            echo
+            # Global jump settings for everyone except bastion
+            echo "[all:vars]"
+            printf "ansible_ssh_common_args='-o IdentitiesOnly=yes -o ControlMaster=auto -o ControlPersist=60s -o ProxyCommand=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/%s.pem -W %%h:%%p ec2-user@%s\"'\n" "${KEY_NAME}" "$FE_JUMP_IP"
           } > ansible/inventory.ini
 
           echo "inventory"
           cat ansible/inventory.ini
+          
 
       # Trust host keys to avoid interactive prompt
-      - name: Trust EC2 SSH host keys
+      - name: Trust EC2 SSH host keys (frontends only)
         run: |
           touch ~/.ssh/known_hosts
-          awk '/ansible_host=/{for(i=1;i<=NF;i++){if($i ~ /ansible_host=/){split($i,a,"="); print a[2]}}}' ansible/inventory.ini \
+          awk '/^\[frontend\]/{f=1;next} /^\[/{f=0} f && /ansible_host=/{for(i=1;i<=NF;i++){if($i ~ /ansible_host=/){split($i,a,"="); print a[2]}}}' ansible/inventory.ini \
             | sort -u \
             | xargs -I{} sh -c 'ssh-keyscan -T 5 -H {} >> ~/.ssh/known_hosts 2>/dev/null || true'
           chmod 600 ~/.ssh/known_hosts
+
 
       # Run Ansible across all instances
       - name: Ansible - deploy containers
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
           ANSIBLE_SSH_ARGS: "-o IdentitiesOnly=yes"
-        run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
+        run: |
+          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
+            -e "backend_alb_dns=${{ steps.tfout.outputs.BE_ALB }}"
+
 
       # Smoke test against the FE ALB
       - name: Smoke check

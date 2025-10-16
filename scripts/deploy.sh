@@ -11,6 +11,8 @@ TF_LOCK_TABLE="${TF_LOCK_TABLE:-a2-tf-locks-s4007755}"
 TF_STATE_KEY="${TF_STATE_KEY:-terraform.tfstate}"
 
 ANSIBLE_SSH_KEY="${ANSIBLE_SSH_KEY:-$HOME/.ssh/${KEY_NAME}.pem}"
+KEY_PATH="$ANSIBLE_SSH_KEY"
+
 
 # Paths
 BOOTSTRAP_DIR="terraform/bootstrap"
@@ -37,16 +39,31 @@ imp() {
   terraform state show "$addr" >/dev/null 2>&1 || terraform import "$addr" "$id"
 }
 
-jq_hosts() {
-  # PrivateIP PublicIP pairs
-  jq -r '.Reservations[].Instances[] | select(.PublicIpAddress != null) | "\(.PrivateIpAddress) \(.PublicIpAddress)"'
+# Frontend rows:
+jq_frontend_rows() {
+  jq -r '
+    .Reservations[].Instances[] |
+    select(.PublicIpAddress != null) |
+    "\(.PrivateIpAddress) \(.PublicIpAddress)"
+  '
 }
+
+# Private only rows:
+jq_private_rows() {
+  jq -r '
+    .Reservations[].Instances[] |
+    select(.PrivateIpAddress != null) |
+    "\(.PrivateIpAddress)"
+  '
+}
+
 
 # Pre flight
 preflight() {
   need terraform
   need aws
   need jq
+  need curl
   need ansible-galaxy || true
   check_creds
 
@@ -123,32 +140,27 @@ tf_root() {
 
 # Outputs:
 read_outputs() {
-  DB_PUB="$(terraform -chdir="$ROOT_DIR" output -raw db_public_ip)"
-  DB_PRIV="$(terraform -chdir="$ROOT_DIR" output -raw db_private_ip)"
-  BE_PUB="$(terraform -chdir="$ROOT_DIR" output -raw backend_public_ip)"
-  BE_PRIV="$(terraform -chdir="$ROOT_DIR" output -raw backend_private_ip)"
-  FE_PUB="$(terraform -chdir="$ROOT_DIR" output -raw frontend_public_ip)"
-  FE_PRIV="$(terraform -chdir="$ROOT_DIR" output -raw frontend_private_ip || true)"
   FE_ALB="$(terraform -chdir="$ROOT_DIR" output -raw frontend_alb_dns)"
   BE_ALB="$(terraform -chdir="$ROOT_DIR" output -raw backend_alb_dns)"
 
   log "Infra outputs:
-  DB    pub=$DB_PUB  priv=$DB_PRIV
-  BE    pub=$BE_PUB  priv=$BE_PRIV
-  FE    pub=$FE_PUB  priv=${FE_PRIV:-n/a}
   FE ALB: $FE_ALB
   BE ALB: $BE_ALB (internal)
 "
 }
 
+
 # Ansible: dependencies, inventory generation and run
 ansible_setup() {
-  check_creds
+  if ! command -v ansible-galaxy >/dev/null; then
+    die "Ansible is not installed. Install Ansible first."
+  fi
   if ! ansible-galaxy collection list | grep -q community.docker; then
     log "Installing Ansible collection: community.docker"
     ansible-galaxy collection install -r "${ANSIBLE_DIR}/requirements.yml"
   fi
 }
+
 
 generate_inventory() {
   log "Generate Ansible inventory from current EC2 instances"
@@ -162,44 +174,66 @@ generate_inventory() {
   DB_JSON="$(aws ec2 describe-instances --region "$AWS_REGION" \
     --filters "Name=tag:Name,Values=a2-db-ec2" "Name=instance-state-name,Values=running")"
 
+  # Choose frontend public IP as the bastion
+  FE_JUMP_IP="$(echo "$FE_JSON" | jq -r '
+      .Reservations[].Instances[] | select(.PublicIpAddress != null) | .PublicIpAddress
+    ' | head -n1)"
+  [[ -n "$FE_JUMP_IP" && "$FE_JUMP_IP" != "null" ]] || die "No frontend public IP found for ProxyJump"
+
   {
+    # Bastion host
+    echo "[bastion]"
+    printf "%s ansible_user=ec2-user ansible_ssh_private_key_file=%s\n" "$FE_JUMP_IP" "$KEY_PATH"
+
+    echo
     echo "[db]"
-    echo "$DB_JSON" | jq_hosts | \
-      awk -v k="$ANSIBLE_SSH_KEY" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s\n",$1,$2,k}'
+    echo "$DB_JSON" | jq_private_rows | \
+      awk -v k="$KEY_PATH" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s\n",$1,$1,k}'
 
     echo
     echo "[backend]"
-    echo "$BE_JSON" | jq_hosts | \
-      awk -v k="$ANSIBLE_SSH_KEY" -v db="$DB_PRIV" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s db_private_ip=%s\n",$1,$2,k,db}'
+    DB_PRIV=$(echo "$DB_JSON" | jq -r '.Reservations[].Instances[] | .PrivateIpAddress' | head -n1)
+    echo "$BE_JSON" | jq_private_rows | \
+      awk -v k="$KEY_PATH" -v db="$DB_PRIV" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s db_private_ip=%s\n",$1,$1,k,db}'
 
     echo
     echo "[frontend]"
-    BE_ENDPOINT="$BE_ALB"
-    if [[ -z "$BE_ENDPOINT" || "$BE_ENDPOINT" == "null" ]]; then
-      BE_ENDPOINT="$(echo "$BE_JSON" | jq -r '.Reservations[].Instances[0].PrivateIpAddress')"
-    fi
-    echo "$FE_JSON" | jq_hosts | \
-      awk -v k="$ANSIBLE_SSH_KEY" -v be="$BE_ENDPOINT" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s backend_private_ip=%s\n",$1,$2,k,be}'
+    echo "$FE_JSON" | jq_frontend_rows | \
+      awk -v k="$KEY_PATH" -v be="$BE_ALB" '{printf "%s ansible_host=%s ansible_user=ec2-user ansible_ssh_private_key_file=%s backend_private_ip=%s\n",$1,$2,k,be}'
+
+    echo
+    echo "[db:vars]"
+    printf "ansible_ssh_common_args='-o IdentitiesOnly=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=6 -o ConnectTimeout=25 -o ControlMaster=auto -o ControlPersist=60s -o ProxyCommand=\"ssh -o IdentitiesOnly=yes -i %s -W %%h:%%p ec2-user@%s\"'\n" \
+      "$KEY_PATH" "$FE_JUMP_IP"
+
+    echo
+    echo "[backend:vars]"
+    printf "ansible_ssh_common_args='-o IdentitiesOnly=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=6 -o ConnectTimeout=25 -o ControlMaster=auto -o ControlPersist=60s -o ProxyCommand=\"ssh -o IdentitiesOnly=yes -i %s -W %%h:%%p ec2-user@%s\"'\n" \
+      "$KEY_PATH" "$FE_JUMP_IP"
   } > "$ANSIBLE_INV"
 
   log "Inventory written to $ANSIBLE_INV"
   cat "$ANSIBLE_INV"
 }
 
+
 trust_hosts() {
-  log "Trust host keys"
+  log "Trust host keys (frontends)"
   touch ~/.ssh/known_hosts
-  awk '/ansible_host=/{for(i=1;i<=NF;i++){if($i ~ /ansible_host=/){split($i,a,"="); print a[2]}}}' "$ANSIBLE_INV" \
+  awk '/^\[frontend\]/{f=1;next} /^\[/{f=0} f && /ansible_host=/{for(i=1;i<=NF;i++){if($i ~ /ansible_host=/){split($i,a,"="); print a[2]}}}' "$ANSIBLE_INV" \
     | sort -u \
     | xargs -I{} sh -c 'ssh-keyscan -T 5 -H {} >> ~/.ssh/known_hosts 2>/dev/null || true'
   chmod 600 ~/.ssh/known_hosts
 }
 
+
 run_ansible() {
   log "Run Ansible"
   ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_SSH_ARGS="-o IdentitiesOnly=yes" \
-  ansible-playbook -i "$ANSIBLE_INV" "${ANSIBLE_DIR}/playbook.yml"
+  ansible-playbook -i "$ANSIBLE_INV" "${ANSIBLE_DIR}/playbook.yml" \
+    -e "backend_alb_dns=${BE_ALB}"
 }
+
 
 # Smoke test (Frontend ALB)
 smoke_test() {

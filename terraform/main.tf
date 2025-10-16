@@ -54,7 +54,7 @@ resource "aws_security_group" "backend_alb" {
     from_port = 8000
     to_port = 8000
     protocol = "tcp"
-    security_groups = [aws_security_group.frontend_alb.id]
+    security_groups = [aws_security_group.frontend.id]
   }
 
   egress {
@@ -110,7 +110,7 @@ resource "aws_security_group" "backend" {
     from_port = 22
     to_port = 22
     protocol = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.frontend.id]
   }
 
   egress {
@@ -138,7 +138,7 @@ resource "aws_security_group" "db" {
     from_port = 22
     to_port = 22
     protocol = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.frontend.id]
   }
 
   egress {
@@ -164,10 +164,10 @@ resource "aws_instance" "db" {
   disable_api_termination = true
   ami = data.aws_ami.al2023.id
   instance_type = "t3.micro"
-  subnet_id = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.db.id]
   key_name = var.key_name
-  associate_public_ip_address = true
+  subnet_id = aws_subnet.private[0].id
+  associate_public_ip_address = false
   tags = { Name = "a2-db-ec2" }
 
   instance_initiated_shutdown_behavior = "stop"
@@ -185,10 +185,10 @@ resource "aws_instance" "backend" {
   count = 2
   ami = data.aws_ami.al2023.id
   instance_type = "t3.micro"
-  subnet_id = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.backend.id]
   key_name = var.key_name
-  associate_public_ip_address = true
+  subnet_id = aws_subnet.private[count.index % length(aws_subnet.private)].id
+  associate_public_ip_address = false
   tags = { Name = "a2-backend-ec2-${count.index}" }
 
   instance_initiated_shutdown_behavior = "stop"
@@ -206,7 +206,7 @@ resource "aws_instance" "frontend" {
   count = 2
   ami = data.aws_ami.al2023.id
   instance_type = "t3.micro"
-  subnet_id = data.aws_subnets.default.ids[0]
+  subnet_id = local.public_subnets_two[count.index % length(local.public_subnets_two)]
   vpc_security_group_ids = [aws_security_group.frontend.id]
   key_name = var.key_name
   associate_public_ip_address = true
@@ -228,7 +228,11 @@ resource "aws_lb" "frontend" {
   load_balancer_type = "application"
   internal = false
   security_groups = [aws_security_group.frontend_alb.id]
-  subnets = data.aws_subnets.default.ids
+  subnets = local.public_subnets_two
+  enable_deletion_protection = false
+  timeouts {
+    delete = "15m"
+  }
 }
 
 resource "aws_lb_target_group" "frontend" {
@@ -271,7 +275,11 @@ resource "aws_lb" "backend" {
   load_balancer_type = "application"
   internal = true
   security_groups = [aws_security_group.backend_alb.id]
-  subnets = data.aws_subnets.default.ids
+  subnets = [for s in aws_subnet.private : s.id]
+  enable_deletion_protection = false
+  timeouts {
+    delete = "15m"
+  }
 }
 
 resource "aws_lb_target_group" "backend" {
@@ -287,7 +295,7 @@ resource "aws_lb_target_group" "backend" {
     unhealthy_threshold = 5
     interval = 30
     timeout= 5
-    matcher= "200-399"
+    matcher = "200-399"
   }
 }
 

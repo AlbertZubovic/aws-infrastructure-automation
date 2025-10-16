@@ -12,3 +12,4 @@ db_password: "postgres"
 db_name: "posts"
 
 backend_internal_url: "http://posts_backend:8000"
+backend_alb_dns: "internal-a2-backend-alb-v2-1876593824.us-east-1.elb.amazonaws.com"
