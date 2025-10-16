@@ -54,6 +54,8 @@
           POSTGRES_USER: "{{ db_user }}"
           POSTGRES_PASSWORD: "{{ db_password }}"
           POSTGRES_DB: "{{ db_name }}"
+        published_ports:
+          - "5432:5432"
         state: started
 
 # Backend host
@@ -86,6 +88,8 @@
           DB_PASSWORD: "{{ db_password }}"
           DB_NAME: "{{ db_name }}"
           PORT: "{{ backend_port | string }}"
+        published_ports:
+        - "{{ backend_port }}:{{ backend_port }}"
         state: started
 
 # Frontend host

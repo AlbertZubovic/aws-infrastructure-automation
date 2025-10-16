@@ -27,19 +27,19 @@ data "aws_subnets" "default" {
 resource "aws_security_group" "frontend_alb" {
   name_prefix = "a2-fe-alb-sg-"
   description = "Frontend ALB"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id = data.aws_vpc.default.id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -48,19 +48,19 @@ resource "aws_security_group" "frontend_alb" {
 resource "aws_security_group" "backend_alb" {
   name_prefix = "a2-be-alb-sg-"
   description = "Backend ALB"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id = data.aws_vpc.default.id
 
   ingress {
-    from_port       = 8000
-    to_port         = 8000
-    protocol        = "tcp"
+    from_port = 8000
+    to_port = 8000
+    protocol = "tcp"
     security_groups = [aws_security_group.frontend.id]
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -69,26 +69,26 @@ resource "aws_security_group" "backend_alb" {
 resource "aws_security_group" "frontend" {
   name_prefix = "a2-frontend-sg-"
   description = "Frontend host"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id = data.aws_vpc.default.id
 
   ingress {
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
     security_groups = [aws_security_group.frontend_alb.id]
   }
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -97,26 +97,26 @@ resource "aws_security_group" "frontend" {
 resource "aws_security_group" "backend" {
   name_prefix = "a2-backend-sg-"
   description = "Backend host"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id = data.aws_vpc.default.id
 
   ingress {
-    from_port       = 8000
-    to_port         = 8000
-    protocol        = "tcp"
+    from_port = 8000
+    to_port = 8000
+    protocol = "tcp"
     security_groups = [aws_security_group.backend_alb.id]
   }
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -125,26 +125,26 @@ resource "aws_security_group" "backend" {
 resource "aws_security_group" "db" {
   name_prefix = "a2-db-sg-"
   description = "DB host"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id = data.aws_vpc.default.id
 
   ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
+    from_port = 5432
+    to_port = 5432
+    protocol = "tcp"
     security_groups = [aws_security_group.backend.id]
   }
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -180,40 +180,40 @@ resource "aws_instance" "db" {
 
 # Backend host
 resource "aws_instance" "backend" {
-  count                       = 2
-  ami                         = data.aws_ami.al2023.id
-  instance_type               = "t3.micro"
-  subnet_id                   = data.aws_subnets.default.ids[0]
-  vpc_security_group_ids      = [aws_security_group.backend.id]
-  key_name                    = var.key_name
+  count = 2
+  ami = data.aws_ami.al2023.id
+  instance_type = "t3.micro"
+  subnet_id = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.backend.id]
+  key_name = var.key_name
   associate_public_ip_address = true
-  tags                        = { Name = "a2-backend-ec2-${count.index}" }
+  tags = { Name = "a2-backend-ec2-${count.index}" }
 
   instance_initiated_shutdown_behavior = "stop"
 
   root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
+    volume_size = 20
+    volume_type = "gp3"
     delete_on_termination = true
   }
 }
 
 # Frontend host
 resource "aws_instance" "frontend" {
-  count                       = 2
-  ami                         = data.aws_ami.al2023.id
-  instance_type               = "t3.micro"
-  subnet_id                   = data.aws_subnets.default.ids[0]
-  vpc_security_group_ids      = [aws_security_group.frontend.id]
-  key_name                    = var.key_name
+  count = 2
+  ami = data.aws_ami.al2023.id
+  instance_type = "t3.micro"
+  subnet_id = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.frontend.id]
+  key_name = var.key_name
   associate_public_ip_address = true
-  tags                        = { Name = "a2-frontend-ec2-${count.index}" }
+  tags = { Name = "a2-frontend-ec2-${count.index}" }
 
   instance_initiated_shutdown_behavior = "stop"
 
   root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
+    volume_size = 20
+    volume_type = "gp3"
     delete_on_termination = true
   }
 }
@@ -221,86 +221,86 @@ resource "aws_instance" "frontend" {
 # Application Load Balancers
 # Frontend ALB
 resource "aws_lb" "frontend" {
-  name               = "a2-frontend-alb"
+  name = "a2-frontend-alb-v2"
   load_balancer_type = "application"
-  internal           = false
-  security_groups    = [aws_security_group.frontend_alb.id]
-  subnets            = data.aws_subnets.default.ids
+  internal = false
+  security_groups = [aws_security_group.frontend_alb.id]
+  subnets = data.aws_subnets.default.ids
 }
 
 resource "aws_lb_target_group" "frontend" {
-  name        = "a2-frontend-tg"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.default.id
+  name = "a2-frontend-tg-v2"
+  port = 80
+  protocol = "HTTP"
+  vpc_id = data.aws_vpc.default.id
   target_type = "instance"
 
   health_check {
-    path                = "/"
-    healthy_threshold   = 2
+    path = "/"
+    healthy_threshold = 2
     unhealthy_threshold = 5
-    interval            = 30
-    timeout             = 5
-    matcher             = "200-399"
+    interval = 30
+    timeout = 5
+    matcher = "200-399"
   }
 }
 
 resource "aws_lb_listener" "frontend" {
   load_balancer_arn = aws_lb.frontend.arn
-  port              = 80
-  protocol          = "HTTP"
+  port = 80
+  protocol = "HTTP"
   default_action {
-    type             = "forward"
+    type = "forward"
     target_group_arn = aws_lb_target_group.frontend.arn
   }
 }
 
 resource "aws_lb_target_group_attachment" "frontend" {
-  for_each         = { for idx, inst in aws_instance.frontend : idx => inst.id }
+  for_each = { for idx, inst in aws_instance.frontend : idx => inst.id }
   target_group_arn = aws_lb_target_group.frontend.arn
-  target_id        = each.value
-  port             = 80
+  target_id = each.value
+  port = 80
 }
 
 # Backend ALB
 resource "aws_lb" "backend" {
-  name               = "a2-backend-alb"
+  name = "a2-backend-alb-v2"
   load_balancer_type = "application"
-  internal           = true
-  security_groups    = [aws_security_group.backend_alb.id]
-  subnets            = data.aws_subnets.default.ids
+  internal = true
+  security_groups = [aws_security_group.backend_alb.id]
+  subnets = data.aws_subnets.default.ids
 }
 
 resource "aws_lb_target_group" "backend" {
-  name        = "a2-backend-tg"
-  port        = 8000
-  protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.default.id
+  name = "a2-backend-tg-v2"
+  port = 8000
+  protocol = "HTTP"
+  vpc_id = data.aws_vpc.default.id
   target_type = "instance"
 
   health_check {
-    path                = "/health"
-    healthy_threshold   = 2
+    path = "/health"
+    healthy_threshold = 2
     unhealthy_threshold = 5
-    interval            = 30
-    timeout             = 5
-    matcher             = "200-399"
+    interval = 30
+    timeout= 5
+    matcher= "200-399"
   }
 }
 
 resource "aws_lb_listener" "backend" {
   load_balancer_arn = aws_lb.backend.arn
-  port              = 8000
-  protocol          = "HTTP"
+  port = 8000
+  protocol = "HTTP"
   default_action {
-    type             = "forward"
+    type = "forward"
     target_group_arn = aws_lb_target_group.backend.arn
   }
 }
 
 resource "aws_lb_target_group_attachment" "backend" {
-  for_each         = { for idx, inst in aws_instance.backend : idx => inst.id }
+  for_each = { for idx, inst in aws_instance.backend : idx => inst.id }
   target_group_arn = aws_lb_target_group.backend.arn
-  target_id        = each.value
-  port             = 8000
+  target_id = each.value
+  port = 8000
 }

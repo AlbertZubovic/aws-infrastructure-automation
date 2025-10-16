@@ -1,3 +1,5 @@
+# Remote backend configuration
+
 # S3 bucket for state
 resource "aws_s3_bucket" "tf_state" {
   bucket = var.state_bucket_name
