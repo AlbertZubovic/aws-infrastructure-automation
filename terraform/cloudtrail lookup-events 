@@ -1,0 +1,34 @@
+[
+    {
+        "EventId": "46b3d88c-8468-4c61-ae9d-d05b2be02426",
+        "EventName": "TerminateInstances",
+        "ReadOnly": "false",
+        "AccessKeyId": "ASIAVRUVQX7CJ4MJ3RUN",
+        "EventTime": "2025-10-16T14:23:23+11:00",
+        "EventSource": "ec2.amazonaws.com",
+        "Username": "sys7411449",
+        "Resources": [
+            {
+                "ResourceType": "AWS::EC2::Instance",
+                "ResourceName": "i-0785ffe52d63f235d"
+            }
+        ],
+        "CloudTrailEvent": "{\"eventVersion\":\"1.10\",\"userIdentity\":{\"type\":\"AssumedRole\",\"principalId\":\"AROAVRUVQX7CKTRAAWER6:sys7411449\",\"arn\":\"arn:aws:sts::381491920836:assumed-role/vocareum/sys7411449\",\"accountId\":\"381491920836\",\"accessKeyId\":\"ASIAVRUVQX7CJ4MJ3RUN\",\"sessionContext\":{\"sessionIssuer\":{\"type\":\"Role\",\"principalId\":\"AROAVRUVQX7CKTRAAWER6\",\"arn\":\"arn:aws:iam::381491920836:role/vocareum\",\"accountId\":\"381491920836\",\"userName\":\"vocareum\"},\"attributes\":{\"creationDate\":\"2025-10-16T03:23:20Z\",\"mfaAuthenticated\":\"false\"}}},\"eventTime\":\"2025-10-16T03:23:23Z\",\"eventSource\":\"ec2.amazonaws.com\",\"eventName\":\"TerminateInstances\",\"awsRegion\":\"us-east-1\",\"sourceIPAddress\":\"52.27.179.127\",\"userAgent\":\"aws-sdk-php/3.351.11 ua/2.1 OS/Linux#6.1.147-172.266.amzn2023.x86_64 lang/php#8.2.29 m/P,e GuzzleHttp/7\",\"requestParameters\":{\"instancesSet\":{\"items\":[{\"instanceId\":\"i-0785ffe52d63f235d\"}]},\"force\":false,\"skipOsShutdown\":false},\"responseElements\":{\"requestId\":\"e1472184-28a4-44d6-acd2-cc01466dbde3\",\"instancesSet\":{\"items\":[{\"instanceId\":\"i-0785ffe52d63f235d\",\"currentState\":{\"code\":32,\"name\":\"shutting-down\"},\"previousState\":{\"code\":32,\"name\":\"shutting-down\"}}]}},\"requestID\":\"e1472184-28a4-44d6-acd2-cc01466dbde3\",\"eventID\":\"46b3d88c-8468-4c61-ae9d-d05b2be02426\",\"readOnly\":false,\"eventType\":\"AwsApiCall\",\"managementEvent\":true,\"recipientAccountId\":\"381491920836\",\"eventCategory\":\"Management\",\"tlsDetails\":{\"tlsVersion\":\"TLSv1.3\",\"cipherSuite\":\"TLS_AES_128_GCM_SHA256\",\"clientProvidedHostHeader\":\"ec2.us-east-1.amazonaws.com\"}}"
+    },
+    {
+        "EventId": "c15b6bd5-b22d-47d9-8b22-1aef9f7a6562",
+        "EventName": "TerminateInstances",
+        "ReadOnly": "false",
+        "AccessKeyId": "ASIAVRUVQX7CJTXICSNL",
+        "EventTime": "2025-10-16T14:23:23+11:00",
+        "EventSource": "ec2.amazonaws.com",
+        "Username": "sys7411449",
+        "Resources": [
+            {
+                "ResourceType": "AWS::EC2::Instance",
+                "ResourceName": "i-0785ffe52d63f235d"
+            }
+        ],
+        "CloudTrailEvent": "{\"eventVersion\":\"1.10\",\"userIdentity\":{\"type\":\"AssumedRole\",\"principalId\":\"AROAVRUVQX7CKTRAAWER6:sys7411449\",\"arn\":\"arn:aws:sts::381491920836:assumed-role/vocareum/sys7411449\",\"accountId\":\"381491920836\",\"accessKeyId\":\"ASIAVRUVQX7CJTXICSNL\",\"sessionContext\":{\"sessionIssuer\":{\"type\":\"Role\",\"principalId\":\"AROAVRUVQX7CKTRAAWER6\",\"arn\":\"arn:aws:iam::381491920836:role/vocareum\",\"accountId\":\"381491920836\",\"userName\":\"vocareum\"},\"attributes\":{\"creationDate\":\"2025-10-16T03:23:20Z\",\"mfaAuthenticated\":\"false\"}}},\"eventTime\":\"2025-10-16T03:23:23Z\",\"eventSource\":\"ec2.amazonaws.com\",\"eventName\":\"TerminateInstances\",\"awsRegion\":\"us-east-1\",\"sourceIPAddress\":\"34.222.117.242\",\"userAgent\":\"aws-sdk-php/3.351.11 ua/2.1 OS/Linux#6.1.147-172.266.amzn2023.x86_64 lang/php#8.2.29 m/P,e GuzzleHttp/7\",\"requestParameters\":{\"instancesSet\":{\"items\":[{\"instanceId\":\"i-0785ffe52d63f235d\"}]},\"force\":false,\"skipOsShutdown\":false},\"responseElements\":{\"requestId\":\"645dcc87-065c-4a59-8cce-916101ee697e\",\"instancesSet\":{\"items\":[{\"instanceId\":\"i-0785ffe52d63f235d\",\"currentState\":{\"code\":32,\"name\":\"shutting-down\"},\"previousState\":{\"code\":16,\"name\":\"running\"}}]}},\"requestID\":\"645dcc87-065c-4a59-8cce-916101ee697e\",\"eventID\":\"c15b6bd5-b22d-47d9-8b22-1aef9f7a6562\",\"readOnly\":false,\"eventType\":\"AwsApiCall\",\"managementEvent\":true,\"recipientAccountId\":\"381491920836\",\"eventCategory\":\"Management\",\"tlsDetails\":{\"tlsVersion\":\"TLSv1.3\",\"cipherSuite\":\"TLS_AES_128_GCM_SHA256\",\"clientProvidedHostHeader\":\"ec2.us-east-1.amazonaws.com\"}}"
+    }
+]
