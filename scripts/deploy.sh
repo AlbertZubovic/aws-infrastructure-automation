@@ -27,8 +27,8 @@ die()  { printf "\n\033[1;31mERROR:\033[0m %s\n" "$*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null || die "Missing '$1' in PATH"; }
 
+# Fail fast if AWS creds invalid
 check_creds() {
-  # Fail fast if AWS creds invalid
   aws sts get-caller-identity >/dev/null 2>&1 \
     || die "AWS credentials not valid. Re authenticate and re run."
 }

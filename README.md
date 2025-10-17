@@ -21,7 +21,7 @@ The Backend service image is available at `rmitdominichynes/sdo-2025:backend`.
 The Backend service depends on a PostgreSQL database, with the required migrations. An image for this has been provided, available at `rmitdominichynes/sdo-2025:db`.
 
 ### Database Configuration
-The PostgreSQL Databse container also requires some environment variables to be configured.
+The PostgreSQL Database container also requires some environment variables to be configured.
 
 |  Environment Variable        |  Purpose                                                  |
 |------------------------------|-----------------------------------------------------------|
@@ -60,52 +60,89 @@ Each container needs:
 ---
 
 
+
+
 # Automated Deployment, Architecture, and Verification
 
-This project automates the deployment of Yeetcode Inc.’s **Posts application** to AWS using **Terraform**, **Ansible**, and **GitHub Actions**.  
+This project automates the deployment of Yeetcode Inc.’s Posts application to AWS using Terraform, Ansible and GitHub Actions.  
 It provisions infrastructure, configures EC2 instances and deploys containerized Frontend, Backend and Database services in a reproducible, secure and fully automated way.
-
-![Repository structure](screenshots/repo-structure.JPG)
-
----
 
 ## Overview
 
-The solution implements a three tier architecture with a load balanced, multi instance setup:
+The solution implements a three tier AWS architecture with separate layers for web, application and data:
 
 | Layer | Purpose | Technology |
 |-------|----------|-------------|
-| Frontend | Serves UI to users via a public load balancer | EC2 ×2, Docker, ALB (public) |
-| Backend | Processes API requests, communicates with the database | EC2 ×2, Docker, ALB (internal) |
-| Database | Stores application data persistently | EC2 ×1, Docker (PostgreSQL) |
-| State Management | Stores Terraform state remotely | S3 + DynamoDB |
-| Automation | Handles provisioning and configuration | Terraform, Ansible and GitHub Actions |
+| **Frontend** | Public facing UI served via Load Balancer | EC2 ×2, Docker, ALB (public) |
+| **Backend** | Internal API and business logic layer | EC2 ×2, Docker, ALB (internal) |
+| **Database** | Persistent PostgreSQL data store | EC2 ×1, Docker |
+| **Networking** | NAT Gateway, Subnets, Bastion Host | VPC with public/private subnets |
+| **Automation** | Infrastructure & configuration deployment | Terraform, Ansible and GitHub Actions |
+| **State Management** | Remote backend storage | S3 and DynamoDB |
 
 **Traffic flow:**  
-`User -> Frontend ALB -> Frontend containers -> Backend ALB -> Backend containers -> PostgreSQL DB`
+`User -> Frontend ALB -> Frontend EC2 -> Backend ALB -> Backend EC2 -> PostgreSQL Database`
 
-![AWS Console showing 5 EC2 instances running](screenshots/aws-console-5-instances.JPG)
 
----
+## Networking, NAT Gateway and Bastion Host
 
-## Infrastructure and Deployment
+To ensure a secure, production-grade AWS network, the infrastructure uses a custom VPC with public and private subnets, a NAT Gateway and a bastion host.
 
-### Terraform
+### Network Topology
+
+| Component | CIDR | Description |
+|------------|------|-------------|
+| **VPC** | `172.31.0.0/16` | The main network boundary for all resources |
+| **Public Subnets** | `172.31.80.0/20`, `172.31.64.0/20` | Contain frontend EC2 and bastion host |
+| **Private Subnets** | `172.31.0.0/20`, `172.31.16.0/20`, `172.31.32.0/20`, `172.31.48.0/20` | Contain backend and DB instances |
+| **NAT Gateway** | Deployed in a public subnet | Allows private EC2s to reach the internet securely |
+| **Internet Gateway** | Attached to VPC | Enables public connectivity for public subnets |
+
+### How it Works
+
+- **Public Subnets** -> Route 0.0.0.0/0 via the Internet Gateway
+- **Private Subnets** -> Route 0.0.0.0/0 via the NAT Gateway  
+- **Bastion Host** -> Used for SSH access to backend and database instances inside private subnets  
+- **Backend and DB Instances** -> Have no public IPs, ensuring a secure, private deployment
+
+### Bastion (Jump Host)
+
+A bastion host is created in a public subnet and acts as the secure gateway to reach private EC2 instances.  
+All SSH and Ansible traffic for the backend and database goes through this bastion host via the `ProxyCommand` setting in the dynamic inventory:
+
+```ini
+[db:vars]
+ansible_ssh_common_args='-o IdentitiesOnly=yes -o IdentityFile=~/.ssh/a2-key3.pem -o ProxyCommand="ssh -i ~/.ssh/a2-key3.pem -o IdentitiesOnly=yes -W %h:%p ec2-user@<bastion-public-ip>"'
+
+[backend:vars]
+ansible_ssh_common_args='-o IdentitiesOnly=yes -o IdentityFile=~/.ssh/a2-key3.pem -o ProxyCommand="ssh -i ~/.ssh/a2-key3.pem -o IdentitiesOnly=yes -W %h:%p ec2-user@<bastion-public-ip>"'
+```
+
+This ensures secure access without exposing private IPs to the internet.
+
+
+## Security Groups
+
+| Security Group | Inbound | Source | Purpose |
+|----------------|----------|---------|----------|
+| **Frontend SG** | 22 (SSH), 80 (HTTP) | `0.0.0.0/0` | Public access |
+| **Backend SG** | 8000 | Frontend SG | Internal communication only |
+| **DB SG** | 5432 | Backend SG | Database traffic only from backend |
+
+This enforces principle of least privilege and isolates network tiers.
+
+
+## Terraform Configuration
 
 Terraform provisions:
-- EC2 instances for Frontend, Backend and Database
-- Security Groups defining clear network boundaries
-- Application Load Balancers for both Frontend and Backend tiers
-- Remote backend using S3 and DynamoDB for state management and locking
+- VPC, Subnets, Route Tables
+- NAT Gateway and Internet Gateway
+- EC2 Instances (Frontend, Backend, DB, Bastion)
+- Security Groups
+- Application Load Balancers
+- Remote Backend (S3 and DynamoDB)
 
-![Terraform apply output showing created EC2 instances, security groups and ALBs](screenshots/terraform-apply-output.JPG)
-
-**Security Groups**
-- **Frontend SG**: Allows inbound HTTP (80) and SSH (22)  
-- **Backend SG**: Allows inbound 8000 only from Frontend SG  
-- **DB SG**: Allows inbound 5432 only from Backend SG  
-
-**Remote Backend Configuration**
+Remote state configuration:
 ```hcl
 terraform {
   backend "s3" {
@@ -117,113 +154,266 @@ terraform {
 }
 ```
 
----
 
 ## Ansible Configuration
 
-Ansible installs Docker, pulls the required images, creates a Docker network (`posts_net`) and starts the containers with appropriate environment variables.
+After Terraform deploys the infrastructure, Ansible automates instance setup:
+- Installs Docker and dependencies
+- Pulls required images (`frontend`, `backend`, `db`)
+- Creates a Docker network (`posts_net`)
+- Starts containers with proper environment variables
 
-![Ansible playbook output showing successful Docker setup and container creation on each EC2 instance](screenshots/ansible-playbook-success.JPG)
+Example playbook tasks:
+```yaml
+- name: Run Frontend container
+  docker_container:
+    name: frontend
+    image: rmitdominichynes/sdo-2025:frontend
+    ports:
+      - "80:80"
+    env:
+      BACKEND_URL: "http://{{ backend_private_ip }}:8000"
+```
 
-### Containers
 
-**Database Container**
-- Image: `rmitdominichynes/sdo-2025:db`
-- Exposed only internally on port `5432`
 
-**Backend Container**
-- Image: `rmitdominichynes/sdo-2025:backend`
-- Exposed on port `8000`
-- Connects to DB via private IPs
+## How to Deploy (Local)
 
-**Frontend Container**
-- Image: `rmitdominichynes/sdo-2025:frontend`
-- Exposed publicly on port `80`
-- BACKEND_URL set to `http://<backend-private-ip>:8000`
+Before running Terraform or Ansible locally, configure your AWS CLI session:
 
-![docker ps output from each host showing running frontend, backend and db containers](screenshots/docker-ps-output.JPG)
+### Step 1 Configure AWS CLI with your current temporary credentials
+```bash
+aws configure set aws_access_key_id     "<aws_access_key_id>"
+aws configure set aws_secret_access_key "<aws_secret_access_key>"
+aws configure set aws_session_token     "<aws_session_token>"
+aws configure set region                us-east-1
 
----
+aws sts get-caller-identity # Verification command
+```
 
-## Deployment Scripts
+> Temporary AWS Academy credentials expire every 4 hours, reconfigure them if Terraform fails due to authentication errors.
 
-### `scripts/deploy.sh`
-Automates infrastructure provisioning and configuration:
 
-1. Runs Terraform init and apply  
-2. Generates dynamic Ansible inventory  
-3. Executes Ansible deployment  
+### Step 2 Set your SSH key name and path
 
-![Terminal running ./scripts/deploy.sh showing successful deployment steps](screenshots/deploy-script-success.JPG)
+Note: I’m using the a2-key3 SSH key located in ~/.ssh/a2-key3.
 
-**Key Features**
-- Uses AWS profile (`academy`) - no credentials hardcoded  
-- Clean structure with clear comments  
-- Safe to re run
+In scripts/deploy.sh:
+```bash
+# EC2 key pair name in AWS
+export KEY_NAME="a2-key3" # Change KEY_NAME to your key name
 
----
+# Local private key file path
+export ANSIBLE_SSH_KEY="$HOME/.ssh/a2-key3" # Change ANSIBLE_SSH_KEY to match your key directory if different
+```
 
-## GitHub Actions Workflow
+### Step 3 Run the one shot deployment script
+```bash
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh
+```
 
-The `.github/workflows/deploy.yml` automates the full deployment pipeline.
+#### What it does:
+1. Bootstraps S3/DynamoDB for remote Terraform state.
+2. Applies the main Terraform stack (VPC bits, subnets, NAT, EC2s, ALBs, SGs).
+3. Reads outputs.
+4. Generates a dynamic Ansible inventory.
+5. Runs the Ansible playbook across the fleet.
+6. Performs a smoke check against the Frontend ALB.
 
-![GitHub Actions run summary showing Terraform and Ansible steps passed](screenshots/github-actions-success.JPG)
+## How to Deploy (GitHub Actions)
+A workflow at `.github/workflows/deploy.yml` deploys infrastructure and app on push to main or via manual workflow_dispatch.
 
-**Triggers**
-- Push to `main`
-- Manual dispatch via Actions UI
+### Set Repository Secrets
+| Secret Name | Description |
+|--------------|--------------|
+| `AWS_ACCESS_KEY_ID` | Temporary access key |
+| `AWS_SECRET_ACCESS_KEY` | Temporary secret key |
+| `AWS_SESSION_TOKEN` | Temporary session token |
+| `AWS_REGION` | Region (`us-east-1`) |
+| `TF_STATE_BUCKET` | Terraform state bucket |
+| `TF_LOCK_TABLE` | DynamoDB lock table |
+| `EC2_SSH_KEY_PEM` | Contents of PEM key |
 
-**Steps**
-- Configure AWS credentials via GitHub Secrets  
-- Terraform apply  
-- Generate Ansible inventory  
-- Run Ansible playbook
+Then trigger Deploy from the Actions tab or push to main.
 
----
+Workflow highlights:
+- Imports S3/DynamoDB if pre existing, applies bootstrap.
+- Initializes remote backend and applies main Terraform.
+- Captures TF outputs.
+- Builds dynamic inventory with bastion jump.
+- Runs Ansible to deploy containers.
+- Smoke test hits the Frontend ALB.
+
+
+## How to Deploy (Manual - Terraform and Ansible)
+
+Before running Terraform or Ansible commands, configure your AWS credentials and SSH key.
+
+### Step 1
+These credentials are needed for Terraform to access AWS.  
+Run the following commands in your terminal:
+
+```bash
+aws configure set aws_access_key_id     "<aws_access_key_id>"
+aws configure set aws_secret_access_key "<aws_secret_access_key>"
+aws configure set aws_session_token     "<aws_session_token>"
+aws configure set region                us-east-1
+
+aws sts get-caller-identity  # Verification command
+```
+
+> Temporary AWS Academy credentials expire every 4 hours, reconfigure them if Terraform fails due to authentication errors.
+
+### Step 2 Set Up Your SSH Key (Manual Deployment)
+
+Point Ansible/SSH directly at your private key file (e.g., `~/.ssh/a2-key3.pem`) and ensure proper permissions:
+
+```bash
+chmod 600 ~/.ssh/a2-key3.pem
+```
+
+You can provide the key to Ansible in any one of these ways:
+
+**Option A - inventory.ini (recommended)**
+```ini
+[all:vars]
+ansible_user=ec2-user
+ansible_ssh_private_key_file=~/.ssh/a2-key3.pem # Change to your key or path name
+```
+
+**Option B - ansible.cfg**
+```ini
+[defaults]
+private_key_file = ~/.ssh/a2-key3.pem # Change to your key or path name
+remote_user = ec2-user
+```
+
+**Option C - CLI flag (per run)**
+```bash
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/a2-key3.pem -u ec2-user # Change to your key or path name
+```
+
+### Step 3 - Deploy Infrastructure with Terraform
+
+Navigate to the Terraform directory and execute the following:
+
+```bash
+cd terraform/
+
+# Initialize Terraform
+terraform init
+
+# Validate syntax and configuration
+terraform validate
+
+# Preview infrastructure plan
+terraform plan
+
+# Apply configuration
+terraform apply -auto-approve
+```
+
+After completion, view outputs to obtain EC2 IPs and ALB URLs:
+
+```bash
+terraform output
+```
+
+These outputs are used by Ansible for configuration.
+
+### Step 4 - Configure EC2 Instances with Ansible
+
+After Terraform completes, switch to your Ansible directory:
+
+```bash
+cd ansible/
+```
+
+Ensure the inventory.ini file references Terraform outputs for backend, frontend and DB.
+
+Then run the playbook:
+
+```bash
+# Deploy across all instances
+ansible-playbook -i inventory.ini playbook.yml
+```
+
+To verify Ansible connectivity before deploying:
+```bash
+ansible all -i inventory.ini -m ping
+```
+
 
 ## Verification
 
-**Frontend:**  
-Accessible via the Frontend ALB on port 80  
+| Component | Verification Method |
+|------------|----------------------|
+| **Frontend** | Visit `http://$(terraform output -raw frontend_alb_dns)` |
+| **Backend** | Test from frontend EC2 via curl |
+| **Database** | Connect from backend EC2 internally |
+| **NAT Gateway** | Check outbound access via `curl https://example.com` from backend instance |
+| **SSH Access** | Only via Bastion |
+
+
+## Cleanup (Tear Down Infrastructure)
+
+When finished testing, remove all AWS resources to avoid costs:
+
 ```bash
-curl -I http://$(terraform output -raw frontend_alb_dns)
+cd terraform/
+terraform destroy -auto-approve
 ```
-![Browser showing frontend UI loaded via ALB DNS](screenshots/frontend-ui.JPG)
 
 
-**Backend:**  
-Accessible only internally via Backend ALB  
-![SSH session into Frontend EC2 showing curl to backend](screenshots/backend-health-from-frontend.JPG)
+## Results
 
-**Database:**  
-Private; accessible only from Backend instance.  
+- Terraform deployed 5 EC2 instances, 2 ALBs, 1 NAT Gateway  
+- Ansible installed Docker and deployed containers  
+- All services healthy in AWS console  
+- Frontend accessible publicly via ALB  
+- Backend and DB accessible only internally  
 
----
+
+## Screenshots
+
+Below are the key verification screenshots demonstrating successful deployment and automation of the Yeetcode Inc. Posts application on AWS:
+
+| Screenshot | Description |
+|-------------|--------------|
+| ![Repository structure](screenshots/repo-structure.JPG) | Repository structure showing directories for Terraform, Ansible and GitHub Actions. |
+| ![AWS Console showing 5 EC2 instances running](screenshots/aws-console-5-instances.JPG) | AWS Console confirming 5 EC2 instances deployed (Frontend ×2, Backend ×2, DB ×1). |
+| ![Terraform apply output showing created EC2 instances, security groups and ALBs](screenshots/terraform-apply-output.JPG) | Terraform output verifying successful creation of networking components and EC2s. |
+| ![Ansible playbook output showing successful Docker setup and container creation on each EC2 instance](screenshots/ansible-playbook-success.JPG) | Ansible execution log confirming Docker installation and container deployment. |
+| ![docker ps output from each host showing running frontend, backend and db containers](screenshots/docker-ps-output.JPG) | Docker container validation proving all services (frontend, backend, db) are running. |
+| ![GitHub Actions run summary showing Terraform and Ansible steps passed](screenshots/github-actions-success.JPG) | GitHub Actions workflow confirming automated CI deployment success. |
+| ![Browser showing frontend UI loaded via ALB DNS](screenshots/frontend-ui.JPG) | Frontend UI accessible through public ALB DNS. |
+| ![AWS target group health showing healthy targets](screenshots/target-groups-healthy.JPG) | AWS Target Groups showing healthy backend and frontend instances. |
+
 
 ## Troubleshooting
 
-| Issue | Cause | Fix |
-|-------|--------|-----|
-| SSH denied | PEM permissions wrong | `chmod 600 ~/.ssh/a2-key3.pem` |
-| No space | Small root volume | Set 20GB in Terraform |
-| 502 on /health | Containers booting | Wait and retry |
-| Missing ports | Incorrect published_ports | Fix playbook vars |
+Common issues and their fixes when deploying the Posts application:
 
-![AWS target group health showing healthy targets](screenshots/target-groups-healthy.JPG)
+| Issue | Cause | Solution |
+|--------|--------|-----------|
+| **SSH or Ansible connection timeout** | Bastion host or private key misconfigured | Ensure the correct PEM key is specified in `ansible_ssh_common_args` and the bastion's public IP is up to date. |
+| **Terraform state lock error** | Previous Terraform run did not unlock DynamoDB state | Run `terraform force-unlock a2-tf-locks-s4007755` or wait for the state to be released automatically. |
+| **GitHub Actions deployment fails** | Missing or expired AWS credentials | Re add valid temporary credentials to repository secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`). |
 
+> Run `terraform output` to quickly verify resource IPs, ALB DNS names and subnet configurations.
 
----
 
 ## Summary
 
-- Automated Terraform, Ansible and GitHub Actions deployment  
-- Multi tier AWS architecture with ALBs  
-- Secure network boundaries between layers  
-- Remote backend (S3 and DynamoDB)  
-- Public FE, private BE and DB  
-- Meets all assignment requirements
+- Automated provisioning and configuration using Terraform, Ansible and GitHub Actions 
+- VPC with NAT Gateway and bastion host for secure, private networking  
+- Scalable, modular 3 tier AWS architecture 
+- Remote Terraform state with S3 and DynamoDB  
+- Zero manual steps beyond triggering the workflow  
 
----
 
-*Author: Albert Zubovic (s4007755)*  
-*Course: COSC2759 Systems Deployment and Operations, RMIT University, Semester 2 2025*
+**Author:** Albert Zubovic S4007755
+**Course:** COSC2759 - Systems Deployment and Operations  
+**University:** RMIT University  
+**Semester:** 2, 2025
