@@ -61,8 +61,7 @@ Each container needs:
 
 
 
-
-# Automated Deployment, Architecture, and Verification
+# Automated Deployment, Architecture and Verification
 
 This project automates the deployment of Yeetcode Inc.’s Posts application to AWS using Terraform, Ansible and GitHub Actions.  
 It provisions infrastructure, configures EC2 instances and deploys containerized Frontend, Backend and Database services in a reproducible, secure and fully automated way.
@@ -83,6 +82,55 @@ The solution implements a three tier AWS architecture with separate layers for w
 **Traffic flow:**  
 `User -> Frontend ALB -> Frontend EC2 -> Backend ALB -> Backend EC2 -> PostgreSQL Database`
 
+
+## Prerequisites
+Before running any deployment commands, ensure the following tools are installed on your local environment.  
+The `scripts/deploy.sh` script will fail if any of these are missing.
+
+| Tool | Purpose |
+|------|----------|
+| **AWS CLI v2** | Used for authentication and communicating with AWS services |
+| **Terraform** | Provisions the AWS infrastructure |
+| **Ansible** (includes `ansible-galaxy`) | Configures EC2 instances after Terraform deploys them |
+| **jq** | Parses JSON output from AWS and Terraform |
+| **curl** | Used for smoke tests and HTTP checks |
+
+### Quick Install (Ubuntu/WSL)
+
+These installation steps are only needed once before the first deployment.
+
+```bash
+# jq
+sudo apt update && sudo apt install -y curl unzip jq gnupg lsb-release software-properties-common
+
+# AWS CLI
+cd /tmp && curl -fsSLO "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+unzip -q awscli-exe-linux-x86_64.zip && sudo ./aws/install
+
+# Terraform
+curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install -y terraform
+
+# Ansible
+sudo apt-add-repository --yes --update ppa:ansible/ansible
+sudo apt install -y ansible
+```
+
+### Verify Installations
+
+```bash
+aws --version
+terraform -version
+ansible --version
+jq --version
+```
+
+Ensure SSH key exists and has the correct permissions:
+```bash
+ls -l ~/.ssh/a2-key3.pem
+chmod 600 ~/.ssh/a2-key3.pem
+```
 
 ## Networking, NAT Gateway and Bastion Host
 
